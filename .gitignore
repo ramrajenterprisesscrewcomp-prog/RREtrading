@@ -1,8 +1,3 @@
-# Secrets — never commit
-.env
-*.env
-.env.*
-
 # Virtual environment
 .venv/
 venv/
@@ -16,20 +11,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
-# Logs & runtime files
-*.log
-logs/
-server.log
-server_err.log
-tsr_test_out.txt
-tsr_test_err.txt
-
-# Generated PDFs (large, re-generated on demand)
-*.pdf
-
-# Runtime cache files
-.oi_last_session.json
 
 # Claude project memory (local only)
 .claude/

@@ -1,0 +1,35 @@
+INFO:     127.0.0.1:58354 - "GET /api/live-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58359 - "POST /api/send-report HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56133 - "GET /api/tsr-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56134 - "GET /api/sector-analysis?force=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56403 - "GET /api/tsr-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56404 - "GET /api/sector-analysis?force=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56512 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56522 - "GET /api/tsr-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56523 - "GET /api/sector-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56524 - "GET /api/pivot-signals HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56522 - "GET /api/live-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56512 - "GET /api/sector-rotation-multi HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61397 - "GET /api/pivot-signals?force=true HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58790 - "GET /api/pivot-signals?force=true HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58804 - "GET /analyze?symbol=TATACONSUM HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58804 - "GET /api/references HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58804 - "GET /api/analyze/TATACONSUM HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54203 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54204 - "GET /api/tsr-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54205 - "GET /api/pivot-signals HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54205 - "GET /api/live-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54203 - "GET /api/sector-rotation-multi HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54204 - "GET /api/sector-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54342 - "GET /api/pivot-signals?force=true HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54357 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54357 - "GET /api/sector-rotation-multi HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54357 - "GET /api/tsr-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54357 - "GET /api/sector-analysis HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54357 - "GET /api/pivot-signals HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54357 - "GET /api/live-stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54465 - "GET /api/pivot-signals?force=true HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:62974 - "GET /api/pivot-signals?force=true HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:63082 - "GET /api/tsr-data HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63082 - "GET /api/sector-analysis?force=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63083 - "GET /api/pivot-signals?force=true HTTP/1.1" 404 Not Found
