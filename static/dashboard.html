@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RRE Stock Analysis Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0a12; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .card { background: #13131c; border: 1px solid #1e1e30; border-radius: 12px; }
+    .card-header { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #6b7280; margin-bottom: 14px; }
+    .stat-box { background: #0d0d18; border: 1px solid #1a1a28; border-radius: 8px; padding: 10px 12px; }
+    .stat-label { font-size: 0.62rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+    .stat-value { font-size: 0.85rem; font-weight: 600; color: #e2e8f0; }
+    .badge-bullish { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+    .badge-bearish { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+    .badge-neutral  { background: rgba(234,179,8,0.15);  color: #eab308; border: 1px solid rgba(234,179,8,0.3); }
+    .badge { padding: 4px 14px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; display: inline-block; }
+    .spinner { width: 44px; height: 44px; border: 4px solid #1e1e30; border-top-color: #10b981; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* news */
+    .news-item { padding: 11px 0; border-bottom: 1px solid #161622; }
+    .news-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .src-badge { font-size: 0.62rem; font-weight: 700; padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
+    .src-mc   { background: rgba(14,165,233,0.12); color: #38bdf8; }
+    .src-et   { background: rgba(234,179,8,0.12);  color: #fbbf24; }
+    .src-mint { background: rgba(16,185,129,0.12); color: #34d399; }
+    .src-bs   { background: rgba(168,85,247,0.12); color: #c084fc; }
+    .src-reu  { background: rgba(251,146,60,0.12); color: #fb923c; }
+    .src-blm  { background: rgba(239,68,68,0.12);  color: #f87171; }
+    .src-rbi  { background: rgba(99,102,241,0.12); color: #818cf8; }
+    .src-sebi { background: rgba(6,182,212,0.12);  color: #22d3ee; }
+    .src-pib  { background: rgba(34,197,94,0.12);  color: #4ade80; }
+    .src-bse  { background: rgba(244,114,182,0.12);color: #f472b6; }
+    .src-default { background: rgba(107,114,128,0.12); color: #9ca3af; }
+    /* buildup */
+    .buildup-long        { color: #10b981; }
+    .buildup-short       { color: #ef4444; }
+    .buildup-cover-short { color: #34d399; }
+    .buildup-cover-long  { color: #f97316; }
+    .buildup-neutral     { color: #eab308; }
+    /* quarterly table */
+    .q-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+    .q-table th { color: #6b7280; padding: 5px 8px; text-align: right; font-weight: 600; border-bottom: 1px solid #1a1a28; white-space: nowrap; }
+    .q-table th:first-child { text-align: left; }
+    .q-table td { padding: 5px 8px; text-align: right; border-bottom: 1px solid #0f0f1a; color: #cbd5e1; }
+    .q-table td:first-child { text-align: left; color: #94a3b8; }
+    .q-table tr:hover td { background: #0d0d18; }
+    /* reference chips */
+    .ref-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 8px; font-size: 0.72rem; font-weight: 600; text-decoration: none; transition: opacity 0.15s; border: 1px solid; }
+    .ref-chip:hover { opacity: 0.75; }
+    .ref-news { background: rgba(14,165,233,0.08); color: #38bdf8; border-color: rgba(14,165,233,0.2); }
+    .ref-data { background: rgba(16,185,129,0.08); color: #34d399; border-color: rgba(16,185,129,0.2); }
+    .ref-govt { background: rgba(168,85,247,0.08); color: #c084fc; border-color: rgba(168,85,247,0.2); }
+    .ref-exchange { background: rgba(251,146,60,0.08); color: #fb923c; border-color: rgba(251,146,60,0.2); }
+    /* misc */
+    input:focus { outline: none; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0a12; }
+    ::-webkit-scrollbar-thumb { background: #2d2d42; border-radius: 3px; }
+    .error-chip { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.18); color: #fca5a5; font-size: 0.68rem; padding: 2px 8px; border-radius: 4px; display: inline-block; margin: 2px; }
+    /* checklist */
+    .chk-item { display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #0f0f1a; }
+    .chk-item:last-child { border-bottom:none; padding-bottom:0; }
+    .chk-icon { font-size:0.8rem;font-weight:800;width:16px;shrink:0;margin-top:2px;text-align:center; }
+    .chk-val  { font-size:0.72rem;color:#cbd5e1;line-height:1.3; }
+    .chk-thr  { font-size:0.62rem;color:#4b5563;margin-top:1px; }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+  <!-- ── TOP BAR ─────────────────────────────────────────────────────────── -->
+  <div style="background:#0d0d18;border-bottom:1px solid #1e1e30;" class="px-6 py-3 flex items-center gap-4 sticky top-0 z-50">
+    <div class="shrink-0 flex items-center gap-3">
+      <a href="/" style="color:#6b7280;font-size:0.75rem;font-weight:600;text-decoration:none;display:flex;align-items:center;gap:4px;"
+         class="hover:text-gray-300 transition-colors">← Home</a>
+      <span class="text-gray-700">|</span>
+      <span class="text-emerald-400 font-bold text-xl tracking-tight">RRE</span>
+      <span class="text-gray-400 font-medium text-xl hidden sm:inline"> Stock Analysis</span>
+    </div>
+    <div class="flex-1 flex gap-3 max-w-lg ml-auto">
+      <input id="tickerInput" type="text" placeholder="NSE symbol — RELIANCE, INFY, NIFTY…"
+        style="background:#0a0a12;border:1px solid #1e1e30;border-radius:8px;padding:8px 14px;color:#e2e8f0;font-size:0.88rem;width:100%;"
+        onkeydown="if(event.key==='Enter') analyzeStock()" />
+      <button onclick="analyzeStock()"
+        style="background:#10b981;border-radius:8px;padding:8px 20px;font-weight:600;font-size:0.88rem;white-space:nowrap;cursor:pointer;border:none;color:#fff;"
+        onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+        Analyze
+      </button>
+    </div>
+  </div>
+
+  <div class="max-w-screen-2xl mx-auto px-4 py-5">
+
+    <!-- ── IDLE ────────────────────────────────────────────────────────────── -->
+    <div id="idleState" class="text-center py-24">
+      <div class="text-6xl mb-5">📊</div>
+      <h2 class="text-2xl font-semibold text-gray-400 mb-2">Enter an NSE Symbol to Begin</h2>
+      <p class="text-gray-600 text-sm mb-8">Supports equities — F&amp;O and non-F&amp;O stocks</p>
+      <!-- Reference sites shown on idle -->
+      <div id="idleRefs"></div>
+    </div>
+
+    <!-- ── LOADING ─────────────────────────────────────────────────────────── -->
+    <div id="loadingState" class="hidden text-center py-24">
+      <div class="spinner mx-auto mb-5"></div>
+      <p class="text-gray-400 text-sm">Fetching from NSE · Screener · Moneycontrol · ET · LiveMint · RBI · SEBI · PIB · OpenAI…</p>
+    </div>
+
+    <!-- ── ERROR ───────────────────────────────────────────────────────────── -->
+    <div id="errorState" class="hidden text-center py-20">
+      <div class="text-5xl mb-4">⚠️</div>
+      <p id="errorMsg" class="text-red-400 text-base"></p>
+    </div>
+
+    <!-- ── DASHBOARD ───────────────────────────────────────────────────────── -->
+    <div id="dashboard" class="hidden">
+
+      <!-- Symbol header -->
+      <div class="flex items-start justify-between flex-wrap gap-4 mb-4">
+        <div>
+          <div class="flex items-center gap-3 flex-wrap">
+            <h1 id="hdrCompany" class="text-2xl font-bold text-white"></h1>
+            <span id="hdrSymbol" class="text-sm text-gray-500 font-mono"></span>
+            <span id="hdrFno" class="hidden text-xs px-2 py-0.5 rounded-full font-bold"
+              style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3);">F&amp;O</span>
+          </div>
+          <p id="hdrSector" class="text-xs text-gray-500 mt-1"></p>
+        </div>
+        <div class="text-right">
+          <div class="flex items-baseline gap-3 justify-end">
+            <span id="hdrPrice" class="text-3xl font-bold"></span>
+            <span id="hdrChange" class="text-base font-semibold"></span>
+          </div>
+          <p id="hdrTimestamp" class="text-xs text-gray-600 mt-1"></p>
+        </div>
+      </div>
+
+      <!-- Stats bar -->
+      <div id="statsBar" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-4"></div>
+
+      <!-- ROW A: Company Overview (2/3) · Technical Analysis (1/3) -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div class="card p-5 lg:col-span-2">
+          <div class="card-header">Company Overview <span class="normal-case font-normal text-gray-600">· NSE · Screener.in</span></div>
+          <div id="overviewContent"></div>
+        </div>
+        <div class="card p-5">
+          <div class="card-header">Technical Analysis <span class="normal-case font-normal text-gray-600">· Yahoo Finance</span></div>
+          <div id="technicalContent"></div>
+        </div>
+      </div>
+
+      <!-- ROW B: Fundamentals · F&O · AI Sentiment -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div class="card p-5">
+          <div class="card-header">Fundamentals &amp; Valuation <span class="normal-case font-normal text-gray-600">· Screener.in</span></div>
+          <div id="fundamentalsGrid" class="grid grid-cols-2 gap-2"></div>
+          <div id="peersContent" class="mt-3"></div>
+        </div>
+        <div class="card p-5">
+          <div class="card-header">F&amp;O Analysis <span class="normal-case font-normal text-gray-600">· NSE</span></div>
+          <div id="foContent"></div>
+        </div>
+        <div class="card p-5">
+          <div class="card-header">AI Sentiment <span class="normal-case font-normal text-gray-600">· GPT-4o</span></div>
+          <div id="sentimentContent"></div>
+        </div>
+      </div>
+
+      <!-- ROW C: Option Chain · Quarterly Results -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div class="card p-5">
+          <div class="card-header">Option Chain Summary <span class="normal-case font-normal text-gray-600">· NSE</span></div>
+          <div id="optionChainContent"></div>
+        </div>
+        <div class="card p-5">
+          <div class="card-header">Quarterly Results <span class="normal-case font-normal text-gray-600">· Screener.in · ₹ Cr</span></div>
+          <div id="quarterlyContent" class="overflow-x-auto max-h-64 overflow-y-auto"></div>
+        </div>
+      </div>
+
+      <!-- ROW D: Investment Checklist (full width) -->
+      <div class="card p-5 mb-4">
+        <div class="card-header">Investment Checklist <span class="normal-case font-normal text-gray-600">· 7-Stage Analysis · Screener.in · NSE</span></div>
+        <div id="checklistContent"></div>
+      </div>
+
+      <!-- ROW E: Recent News (2 col) · Policy & Regulatory (1 col) -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div class="card p-5 lg:col-span-2">
+          <div class="card-header">
+            Recent News
+            <span class="normal-case font-normal text-gray-600">· Moneycontrol · ET · LiveMint · Business Standard · Reuters · Bloomberg</span>
+          </div>
+          <div id="newsContent"></div>
+        </div>
+        <div class="card p-5">
+          <div class="card-header">
+            Policy &amp; Regulatory
+            <span class="normal-case font-normal text-gray-600">· RBI · SEBI · PIB · FinMin</span>
+          </div>
+          <div id="policyContent"></div>
+        </div>
+      </div>
+
+      <!-- ROW D: AI Summary (full width) -->
+      <div class="card p-5 mb-4">
+        <div class="card-header">AI-Powered Analysis <span class="normal-case font-normal text-gray-600">· GPT-4o</span></div>
+        <div id="aiSummaryContent" class="text-gray-300 text-sm leading-relaxed"></div>
+      </div>
+
+      <!-- ROW E: Reference Sites -->
+      <div class="card p-5 mb-4">
+        <div class="card-header">Data Sources &amp; Reference Sites</div>
+        <div id="refSitesContent"></div>
+      </div>
+
+      <!-- Errors strip -->
+      <div id="errorsRow" class="hidden mb-4">
+        <p class="text-xs text-gray-600 mb-1">Partial data — some sources unavailable:</p>
+        <div id="errorsContent"></div>
+      </div>
+
+    </div><!-- /#dashboard -->
+  </div><!-- /.container -->
+
+  <script>
+  // ── HELPERS ──────────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+
+  function fmt(n, d = 2) {
+    if (n == null || isNaN(Number(n))) return 'N/A';
+    return Number(n).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function fmtVol(n) {
+    if (!n) return 'N/A';
+    if (n >= 1e7) return (n/1e7).toFixed(2)+' Cr';
+    if (n >= 1e5) return (n/1e5).toFixed(2)+' L';
+    if (n >= 1e3) return (n/1e3).toFixed(1)+' K';
+    return n;
+  }
+  function fmtOI(n) {
+    if (n == null) return 'N/A';
+    if (n >= 1e7) return (n/1e7).toFixed(2)+' Cr';
+    if (n >= 1e5) return (n/1e5).toFixed(2)+' L';
+    return n;
+  }
+  function fmtDate(str) {
+    if (!str) return '';
+    try { return new Date(str).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+    catch { return str.substring(0,10); }
+  }
+  function statBox(label, value) {
+    return `<div class="stat-box"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
+  }
+
+  // ── SOURCE BADGE ─────────────────────────────────────────────────────────
+  const SRC_MAP = {
+    'moneycontrol': ['src-mc',  'MC'],
+    'economic times': ['src-et',  'ET'],
+    'economictimes': ['src-et',  'ET'],
+    'livemint':      ['src-mint','Mint'],
+    'mint':          ['src-mint','Mint'],
+    'business standard': ['src-bs','BS'],
+    'reuters':       ['src-reu', 'Reuters'],
+    'bloomberg':     ['src-blm', 'Bloomberg'],
+    'rbi':           ['src-rbi', 'RBI'],
+    'sebi':          ['src-sebi','SEBI'],
+    'pib':           ['src-pib', 'PIB'],
+    'bse':           ['src-bse', 'BSE'],
+    'nse':           ['src-rbi', 'NSE'],
+  };
+  function srcBadge(source) {
+    const key = (source || '').toLowerCase();
+    for (const [k, [cls, label]] of Object.entries(SRC_MAP)) {
+      if (key.includes(k)) return `<span class="src-badge ${cls}">${label}</span>`;
+    }
+    return `<span class="src-badge src-default">${(source||'News').substring(0,14)}</span>`;
+  }
+
+  function newsItem(n, linkClass) {
+    const url = n.url || '#';
+    const dt  = fmtDate(n.published_at);
+    const desc = n.description ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${n.description.replace(/<[^>]+>/g,'').substring(0,140)}</p>` : '';
+    return `<div class="news-item">
+      <div class="flex items-start gap-2 mb-1">
+        ${srcBadge(n.source)}
+        <a href="${url}" target="_blank" rel="noopener"
+           class="text-sm ${linkClass} hover:underline leading-snug flex-1">${n.title||'—'}</a>
+      </div>
+      ${desc}
+      <p class="text-xs text-gray-700 mt-1">${n.source||''}${dt?' · '+dt:''}</p>
+    </div>`;
+  }
+
+  // ── REF SITES ─────────────────────────────────────────────────────────────
+  const CAT_ICON = { news:'📰', data:'📈', govt:'🏛️', exchange:'🔔' };
+  const CAT_CLS  = { news:'ref-news', data:'ref-data', govt:'ref-govt', exchange:'ref-exchange' };
+
+  function renderRefSites(sites) {
+    if (!sites || !sites.length) return '';
+    const groups = {};
+    for (const s of sites) {
+      (groups[s.cat] = groups[s.cat] || []).push(s);
+    }
+    const ORDER = ['exchange','news','data','govt'];
+    const LABELS = { exchange:'Exchanges', news:'Market News', data:'Data & Charts', govt:'Official India' };
+    let html = '';
+    for (const cat of ORDER) {
+      if (!groups[cat]) continue;
+      html += `<div class="mb-4">
+        <p class="text-xs text-gray-600 font-semibold uppercase tracking-wide mb-2">${CAT_ICON[cat]} ${LABELS[cat]}</p>
+        <div class="flex flex-wrap gap-2">
+          ${groups[cat].map(s =>
+            `<a href="${s.url}" target="_blank" rel="noopener" class="ref-chip ${CAT_CLS[cat]}">${s.name}</a>`
+          ).join('')}
+        </div>
+      </div>`;
+    }
+    return html;
+  }
+
+  // Show reference sites on idle screen too
+  async function loadIdleRefs() {
+    try {
+      const r = await fetch('/api/references');
+      const d = await r.json();
+      $('idleRefs').innerHTML = `
+        <div class="max-w-3xl mx-auto text-left">
+          <p class="text-xs text-gray-500 text-center mb-4 uppercase tracking-widest">Data Sources</p>
+          ${renderRefSites(d.sites)}
+        </div>`;
+    } catch {}
+  }
+  loadIdleRefs();
+
+  // ── FETCH & RENDER ────────────────────────────────────────────────────────
+  async function analyzeStock() {
+    const symbol = $('tickerInput').value.trim().toUpperCase();
+    if (!symbol) return;
+
+    $('idleState').classList.add('hidden');
+    $('loadingState').classList.remove('hidden');
+    $('dashboard').classList.add('hidden');
+    $('errorState').classList.add('hidden');
+
+    try {
+      const resp = await fetch(`/api/analyze/${encodeURIComponent(symbol)}`);
+      if (!resp.ok) {
+        const err = await resp.json().catch(()=>({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      $('loadingState').classList.add('hidden');
+      renderDashboard(data);
+      $('dashboard').classList.remove('hidden');
+    } catch (err) {
+      $('loadingState').classList.add('hidden');
+      $('errorState').classList.remove('hidden');
+      $('errorMsg').textContent = `Error: ${err.message}`;
+    }
+  }
+
+  function renderDashboard(d) {
+    const isUp     = (d.pchange || 0) >= 0;
+    const priceClr = isUp ? 'text-emerald-400' : 'text-red-400';
+
+    // Header
+    $('hdrCompany').textContent = d.company_name || d.symbol;
+    $('hdrSymbol').textContent  = `NSE: ${d.symbol}`;
+    if (d.sector || d.industry)
+      $('hdrSector').textContent = [d.sector, d.industry].filter(Boolean).join(' · ');
+    $('hdrFno').classList.toggle('hidden', !d.is_fno);
+    $('hdrPrice').className  = `text-3xl font-bold ${priceClr}`;
+    $('hdrPrice').textContent = `₹${fmt(d.last_price)}`;
+    $('hdrChange').className  = `text-base font-semibold ${priceClr}`;
+    $('hdrChange').textContent = `${isUp?'▲':'▼'} ${fmt(Math.abs(d.pchange))}%  (${isUp?'+':''}${fmt(d.change)})`;
+    $('hdrTimestamp').textContent = `Data as of ${fmtDate(d.data_timestamp)}`;
+
+    // Stats bar
+    $('statsBar').innerHTML = [
+      statBox('Open',         `₹${fmt(d.open)}`),
+      statBox('High (Day)',   `₹${fmt(d.high)}`),
+      statBox('Low (Day)',    `₹${fmt(d.low)}`),
+      statBox('Prev Close',  `₹${fmt(d.close)}`),
+      statBox('52W High',    `₹${fmt(d.week_52_high)}`),
+      statBox('52W Low',     `₹${fmt(d.week_52_low)}`),
+      statBox('Volume',       fmtVol(d.volume)),
+      statBox('Delivery %',   d.delivery_pct != null ? `${fmt(d.delivery_pct)}%` : 'N/A'),
+    ].join('');
+
+    // ── Company Overview ──────────────────────────────────────────────────
+    {
+      const indices = (d.nifty_indices || []);
+      const idxBadges = indices.map(idx =>
+        `<span style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);padding:2px 8px;border-radius:5px;font-size:0.65rem;font-weight:700;">${idx}</span>`
+      ).join(' ');
+      const sectorLine = [d.macro_sector, d.sector, d.industry, d.basic_industry]
+        .filter(Boolean).join(' › ');
+      const fnoTag = d.is_fno
+        ? `<span style="background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.25);padding:2px 7px;border-radius:5px;font-size:0.65rem;font-weight:700;">F&O</span>`
+        : '';
+      const listed = d.listing_date ? `<span class="text-gray-600">Listed: ${d.listing_date}</span>` : '';
+      const aboutText = d.about && d.about.length > 20
+        ? `<p class="text-gray-300 text-sm leading-relaxed mt-3">${d.about}</p>`
+        : `<p class="text-gray-600 text-sm mt-3 italic">Business description not available from Screener.in for this stock.</p>`;
+
+      $('overviewContent').innerHTML = `
+        <div class="flex flex-wrap gap-2 items-center mb-2">
+          ${fnoTag} ${idxBadges}
+          ${sectorLine ? `<span class="text-xs text-gray-500">${sectorLine}</span>` : ''}
+          ${listed}
+        </div>
+        ${aboutText}
+      `;
+    }
+
+    // ── Technical Analysis ────────────────────────────────────────────────
+    {
+      const tech = d.technical;
+      if (!tech) {
+        $('technicalContent').innerHTML = `<p class="text-gray-500 text-sm">Technical data unavailable (Yahoo Finance could not load data for this symbol).</p>`;
+      } else {
+        const rsi = tech.rsi;
+        const rsiColor  = rsi == null ? 'text-gray-500' : rsi < 30 ? 'text-emerald-400' : rsi > 70 ? 'text-red-400' : 'text-yellow-400';
+        const rsiLabel  = rsi == null ? 'N/A' : rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : rsi < 50 ? 'Bearish Zone' : 'Bullish Zone';
+        const rsiPct    = rsi != null ? Math.min(100, Math.max(0, rsi)) : 0;
+        const rsiDotClr = rsi == null ? '#6b7280' : rsi < 30 ? '#10b981' : rsi > 70 ? '#ef4444' : '#fbbf24';
+
+        const st = tech.supertrend || {};
+        const stBull = st.direction === 'Bullish';
+        const stColor = stBull ? 'text-emerald-400' : 'text-red-400';
+        const stBg    = stBull ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+        const stBorder = stBull ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)';
+
+        const price   = d.last_price || tech.last_close || 0;
+        const ema20   = tech.ema20;
+        const ema50   = tech.ema50;
+        const aboveEma20 = ema20 && price > ema20;
+        const aboveEma50 = ema50 && price > ema50;
+
+        // Beta
+        const beta      = tech.beta;
+        const betaColor = beta == null ? '#6b7280'
+                        : beta > 1.5  ? '#ef4444'
+                        : beta > 1.0  ? '#f59e0b'
+                        : beta > 0.5  ? '#10b981'
+                        : '#60a5fa';
+        const betaLabel = beta == null ? 'N/A'
+                        : beta > 1.5  ? 'High Volatility'
+                        : beta > 1.0  ? 'Market Linked'
+                        : beta > 0.5  ? 'Moderate'
+                        : 'Defensive';
+        // clamp beta to 0–2.5 for gauge width
+        const betaBarW  = beta != null ? Math.min(100, Math.max(0, (beta / 2.5) * 100)) : 0;
+
+        // Golden / Death cross
+        let crossLabel = '';
+        if (ema20 && ema50) {
+          crossLabel = ema20 > ema50
+            ? `<span class="text-emerald-400 text-xs font-semibold">Golden Cross ▲</span>`
+            : `<span class="text-red-400 text-xs font-semibold">Death Cross ▼</span>`;
+        }
+
+        $('technicalContent').innerHTML = `
+          <div class="mb-4">
+            <div class="flex justify-between text-xs text-gray-600 mb-1">
+              <span>0 · Oversold</span><span>RSI(14)</span><span>Overbought · 100</span>
+            </div>
+            <div style="background:#1a1a2e;border-radius:6px;height:10px;position:relative;overflow:visible;">
+              <div style="position:absolute;left:0;top:0;width:30%;height:100%;background:rgba(16,185,129,0.18);border-radius:6px 0 0 6px;"></div>
+              <div style="position:absolute;left:70%;top:0;width:30%;height:100%;background:rgba(239,68,68,0.18);border-radius:0 6px 6px 0;"></div>
+              <div style="position:absolute;left:${rsiPct}%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;background:${rsiDotClr};border-radius:50%;border:2px solid #0a0a1f;box-shadow:0 0 6px ${rsiDotClr};"></div>
+            </div>
+            <div class="flex justify-center mt-2 gap-3 items-baseline">
+              <span class="text-2xl font-bold ${rsiColor}">${rsi != null ? rsi : 'N/A'}</span>
+              <span class="text-xs font-semibold ${rsiColor}">${rsiLabel}</span>
+            </div>
+          </div>
+
+          <div style="background:${stBg};border:1px solid ${stBorder};border-radius:8px;padding:10px;text-align:center;margin-bottom:12px;">
+            <div class="text-xs text-gray-500 mb-1">Supertrend (10, 3)</div>
+            <div class="text-lg font-bold ${stColor}">${stBull ? '▲' : '▼'} ${st.direction || 'N/A'}</div>
+            ${st.value ? `<div class="text-xs text-gray-500 mt-1">Level: ₹${fmt(st.value)}</div>` : ''}
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 text-xs">
+            <div class="stat-box">
+              <div class="stat-label">EMA 20</div>
+              <div class="stat-value ${ema20 ? (aboveEma20 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-500'}">
+                ${ema20 ? `₹${fmt(ema20)}` : 'N/A'}
+              </div>
+              ${ema20 ? `<div class="text-xs ${aboveEma20 ? 'text-emerald-400' : 'text-red-400'}">${aboveEma20 ? 'Above ▲' : 'Below ▼'}</div>` : ''}
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">EMA 50</div>
+              <div class="stat-value ${ema50 ? (aboveEma50 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-500'}">
+                ${ema50 ? `₹${fmt(ema50)}` : 'N/A'}
+              </div>
+              ${ema50 ? `<div class="text-xs ${aboveEma50 ? 'text-emerald-400' : 'text-red-400'}">${aboveEma50 ? 'Above ▲' : 'Below ▼'}</div>` : ''}
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Beta (1Y)</div>
+              <div class="stat-value" style="color:${betaColor};">
+                ${beta != null ? beta : 'N/A'}
+              </div>
+              <div class="text-xs" style="color:${betaColor};">${beta != null ? betaLabel : ''}</div>
+            </div>
+          </div>
+          ${crossLabel ? `<div class="text-center mt-2">${crossLabel}</div>` : ''}
+
+          ${beta != null ? `
+          <div class="mt-3">
+            <div class="flex justify-between text-xs text-gray-600 mb-1">
+              <span>0 · Defensive</span><span>Beta vs Nifty 50</span><span>2.5 · High Risk</span>
+            </div>
+            <div style="background:#1a1a2e;border-radius:6px;height:8px;position:relative;overflow:hidden;">
+              <div style="position:absolute;left:0;top:0;width:40%;height:100%;background:rgba(16,185,129,0.15);"></div>
+              <div style="position:absolute;left:40%;top:0;width:20%;height:100%;background:rgba(245,158,11,0.15);"></div>
+              <div style="position:absolute;left:60%;top:0;width:40%;height:100%;background:rgba(239,68,68,0.15);border-radius:0 6px 6px 0;"></div>
+              <div style="position:absolute;left:40%;top:0;width:1px;height:100%;background:rgba(255,255,255,0.15);"></div>
+              <div style="position:absolute;left:${betaBarW}%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;background:${betaColor};border-radius:50%;border:2px solid #0a0a1f;box-shadow:0 0 5px ${betaColor};"></div>
+            </div>
+            <div class="text-center text-xs mt-1" style="color:${betaColor};">
+              β = ${beta} &nbsp;·&nbsp; ${betaLabel}
+              ${beta > 1 ? `<span class="text-gray-500"> · moves ~${beta}× market</span>` : beta < 1 ? `<span class="text-gray-500"> · less volatile than market</span>` : ''}
+            </div>
+          </div>` : ''}
+        `;
+      }
+    }
+
+    // Fundamentals
+    $('fundamentalsGrid').innerHTML = [
+      statBox('Market Cap',   d.market_cap  ? `₹${fmt(d.market_cap)} Cr` : 'N/A'),
+      statBox('P/E Ratio',    d.pe_ratio    != null ? fmt(d.pe_ratio, 1) : 'N/A'),
+      statBox('Book Value',   d.book_value  != null ? `₹${fmt(d.book_value)}` : 'N/A'),
+      statBox('ROE',          d.roe         != null ? `${fmt(d.roe,1)}%` : 'N/A'),
+      statBox('ROCE',         d.roce        != null ? `${fmt(d.roce,1)}%` : 'N/A'),
+      statBox('Div Yield',    d.div_yield   != null ? `${fmt(d.div_yield,2)}%` : 'N/A'),
+    ].join('');
+
+    // ── Sector Valuation (NSE Index PE) ──────────────────────────────────
+    {
+      const idxPe  = d.sector_index_pe;
+      const idxName = d.sector_index_name || '';
+      const stockPe = d.pe_ratio;
+      const valuation = d.valuation_vs_sector;
+      const valColor = valuation === 'Expensive'  ? 'text-red-400'
+                     : valuation === 'Premium'    ? 'text-orange-400'
+                     : valuation === 'Discount'   ? 'text-emerald-400'
+                     : valuation === 'Fair Value' ? 'text-yellow-400'
+                     : 'text-gray-500';
+
+      if (idxPe != null) {
+        const prem = stockPe && idxPe ? ((stockPe / idxPe - 1) * 100).toFixed(1) : null;
+        const premColor = prem == null ? '' : prem > 0 ? 'text-orange-400' : 'text-emerald-400';
+        const premLabel = prem == null ? '' : `(${prem > 0 ? '+' : ''}${prem}% vs index)`;
+
+        $('peersContent').innerHTML = `
+          <div class="border-t border-gray-800 pt-3 mt-1">
+            <div class="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">Sector PE Comparison</div>
+            <div class="grid grid-cols-2 gap-2 mb-2">
+              ${statBox('Stock P/E',  stockPe != null ? fmt(stockPe, 1) : 'N/A')}
+              ${statBox(idxName || 'Index P/E', fmt(idxPe, 1))}
+            </div>
+            ${valuation ? `
+            <div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:8px;" class="text-xs flex items-center justify-between">
+              <span class="text-gray-500">Valuation vs Sector</span>
+              <span class="font-bold ${valColor}">${valuation}
+                ${prem != null ? `<span class="${premColor} font-normal ml-1">${premLabel}</span>` : ''}
+              </span>
+            </div>` : ''}
+          </div>`;
+      } else {
+        $('peersContent').innerHTML = '';
+      }
+    }
+
+    // F&O
+    if (d.is_fno) {
+      const buMap = {
+        'Long Buildup':       ['buildup-long',        '🟢', 'Bullish — Fresh longs being added'],
+        'Short Buildup':      ['buildup-short',       '🔴', 'Bearish — Fresh shorts being added'],
+        'Short Covering':     ['buildup-cover-short', '🟩', 'Mildly Bullish — Shorts exiting'],
+        'Long Covering':      ['buildup-cover-long',  '🟧', 'Mildly Bearish — Longs exiting'],
+        'Neutral / Sideways': ['buildup-neutral',     '🟡', 'No clear directional bias'],
+      };
+      const [buCls, buIcon, buDesc] = buMap[d.buildup_signal] || ['text-gray-400','⬜','Insufficient data'];
+
+      // Data source badge
+      const isLive = (d.fno_data_source || '').toLowerCase() === 'live';
+      const srcBadgeHtml = d.fno_data_source
+        ? isLive
+          ? `<span style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);padding:2px 8px;border-radius:5px;font-size:0.65rem;font-weight:700;">● LIVE</span>`
+          : `<span style="background:rgba(234,179,8,0.12);color:#fbbf24;border:1px solid rgba(234,179,8,0.25);padding:2px 8px;border-radius:5px;font-size:0.65rem;font-weight:700;">🕐 ${d.fno_data_source}</span>`
+        : '';
+
+      // Market status banner
+      const mktBanner = !d.market_is_open
+        ? `<div style="background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.2);border-radius:7px;padding:7px 10px;margin-bottom:12px;" class="text-xs text-yellow-300 flex items-center gap-2">
+            <span>🕐</span><span>Market Closed — Showing last session's EOD data from NSE Bhavcopy</span>
+           </div>`
+        : '';
+
+      // OI Change abs (contracts)
+      const oiChgAbs = d.oi_change_abs != null
+        ? `<span class="${d.oi_change_abs >= 0 ? 'text-emerald-400' : 'text-red-400'}">${d.oi_change_abs >= 0 ? '+' : ''}${fmtOI(d.oi_change_abs)}</span>`
+        : 'N/A';
+
+      // Futures LTP vs Settle
+      const futLTP     = d.futures_ltp    ? `₹${fmt(d.futures_ltp)}`    : 'N/A';
+      const futSettle  = d.futures_settle ? `₹${fmt(d.futures_settle)}` : 'N/A';
+      const basis      = (d.futures_ltp && d.last_price)
+        ? (d.futures_ltp - d.last_price).toFixed(2)
+        : null;
+      const basisHtml  = basis != null
+        ? `<span class="${Number(basis) >= 0 ? 'text-emerald-400' : 'text-red-400'}">${Number(basis) >= 0 ? '+' : ''}${basis}</span>`
+        : 'N/A';
+
+      $('foContent').innerHTML = `
+        ${mktBanner}
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xl font-bold ${buCls}">${buIcon} ${d.buildup_signal || 'N/A'}</span>
+          ${srcBadgeHtml}
+        </div>
+        <p class="text-xs text-gray-500 mb-4">${buDesc}</p>
+
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          ${statBox('Total OI',      fmtOI(d.open_interest))}
+          ${statBox('OI Change',     oiChgAbs)}
+          ${statBox('OI Chg %',      d.oi_change_pct != null ? `${fmt(d.oi_change_pct, 2)}%` : 'N/A')}
+          ${statBox('PCR (OI)',      d.pcr != null ? fmt(d.pcr, 2) : 'N/A')}
+          ${statBox('Call OI',       fmtOI(d.option_chain_summary?.total_call_oi))}
+          ${statBox('Put OI',        fmtOI(d.option_chain_summary?.total_put_oi))}
+          ${statBox('Fut LTP',       futLTP)}
+          ${statBox('Basis (F–S)',   basisHtml)}
+        </div>
+
+        <div style="background:#0d0d1a;border:1px solid #1e1e30;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-bold text-gray-500 uppercase tracking-wide" style="letter-spacing:.07em;">📦 Futures Contract</div>
+            ${d.fut_expiry ? `<span style="font-size:0.6rem;color:#6b7280;">Expiry: ${d.fut_expiry}</span>` : ''}
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            ${statBox('Lot Size', d.lot_size ? `${Number(d.lot_size).toLocaleString('en-IN')} units` : 'N/A')}
+            ${statBox('Contract Value', d.contract_value ? `₹${Number(d.contract_value).toLocaleString('en-IN', {maximumFractionDigits:0})}` : 'N/A')}
+            ${(() => {
+              if (!d.margin_required) return statBox('Margin (Angel One)', '<span style="color:#6b7280;">N/A</span>');
+              const m = Number(d.margin_required);
+              const label = m >= 1e7 ? `₹${(m/1e7).toFixed(2)} Cr` : m >= 1e5 ? `₹${(m/1e5).toFixed(2)} L` : `₹${m.toLocaleString('en-IN',{maximumFractionDigits:0})}`;
+              return statBox('Margin (Angel One)', `<span style="color:#818cf8;font-weight:700;">${label}</span>`);
+            })()}
+          </div>
+          <div class="text-gray-700 mt-2" style="font-size:0.58rem;">Lot size &amp; margin from Angel One SmartAPI · 1 lot CARRYFORWARD · Actual margin may vary by account type.</div>
+        </div>
+
+        ${d.max_pain ? statBox('Max Pain', `₹${fmt(d.max_pain, 0)}`) + '<br>' : ''}
+
+        <div style="background:#0a0a12;border-radius:6px;padding:8px;margin-top:8px" class="text-xs text-gray-600 leading-relaxed">
+          <span class="text-emerald-400">▲OI + ▲Price</span> = Long Buildup &nbsp;|&nbsp;
+          <span class="text-red-400">▲OI + ▼Price</span> = Short Buildup<br>
+          <span class="text-emerald-300">▼OI + ▲Price</span> = Short Covering &nbsp;|&nbsp;
+          <span class="text-orange-400">▼OI + ▼Price</span> = Long Covering
+        </div>`;
+    } else {
+      $('foContent').innerHTML = `<p class="text-gray-500 text-sm">This stock is <strong class="text-gray-400">not</strong> in the F&amp;O segment.</p>`;
+    }
+
+    // AI Sentiment
+    const sentMap = {
+      Bullish: ['badge-bullish','↑ Bullish'],
+      Bearish: ['badge-bearish','↓ Bearish'],
+      Neutral: ['badge-neutral','→ Neutral'],
+    };
+    const [sentCls, sentLabel] = sentMap[d.ai_sentiment] || sentMap['Neutral'];
+    const risks     = (d.ai_risks||[]).map(r=>`<li class="text-xs text-red-300 mb-1">• ${r}</li>`).join('');
+    const catalysts = (d.ai_catalysts||[]).map(c=>`<li class="text-xs text-emerald-300 mb-1">• ${c}</li>`).join('');
+    $('sentimentContent').innerHTML = `
+      <div class="text-center mb-5">
+        <span class="badge ${sentCls} text-lg px-6 py-2">${sentLabel}</span>
+      </div>
+      ${risks ? `<p class="text-xs text-gray-500 font-semibold mb-1 uppercase tracking-wide">Key Risks</p><ul class="mb-4">${risks}</ul>` : ''}
+      ${catalysts ? `<p class="text-xs text-gray-500 font-semibold mb-1 uppercase tracking-wide">Key Catalysts</p><ul>${catalysts}</ul>` : ''}`;
+
+    // Option chain
+    const oc = d.option_chain_summary;
+    if (d.is_fno && oc) {
+      const pcr = oc.pcr_oi;
+      const pcrColor = pcr == null ? 'text-gray-500' : pcr > 1.2 ? 'text-emerald-400' : pcr < 0.8 ? 'text-red-400' : 'text-yellow-400';
+      const pcrLabel = pcr == null ? 'PCR available during market hours only' : pcr > 1.2 ? 'Bullish (Put heavy)' : pcr < 0.8 ? 'Bearish (Call heavy)' : 'Neutral';
+      $('optionChainContent').innerHTML = `
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          ${statBox('Near Expiry',   oc.expiry_date||'N/A')}
+          ${statBox('Spot / LTP',    oc.underlying_value ? `₹${fmt(oc.underlying_value)}` : 'N/A')}
+          ${statBox('Total Call OI', fmtOI(oc.total_call_oi))}
+          ${statBox('Total Put OI',  fmtOI(oc.total_put_oi))}
+          ${statBox('Max Pain',      oc.max_pain ? `₹${fmt(oc.max_pain,0)}` : 'N/A')}
+          <div class="stat-box"><div class="stat-label">PCR (OI)</div>
+            <div class="stat-value ${pcrColor}">${pcr!=null?fmt(pcr,2):'N/A'}</div></div>
+        </div>
+        <div style="background:#0a0a12;border-radius:6px;padding:8px" class="text-xs">
+          <span class="${pcrColor} font-semibold">${pcrLabel}</span>
+          ${pcr!=null?'<span class="text-gray-600 ml-2">· PCR &gt; 1.2 = Bullish, &lt; 0.8 = Bearish</span>':''}
+        </div>`;
+    } else {
+      $('optionChainContent').innerHTML = `<p class="text-gray-500 text-sm">Option chain data not available${!d.is_fno?' (not an F&O stock)':''}.</p>`;
+    }
+
+    // Quarterly table
+    const qr = d.quarterly_results || [];
+    if (qr.length > 0) {
+      const headers = Object.keys(qr[0]);
+      $('quarterlyContent').innerHTML = `<table class="q-table">
+        <thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+        <tbody>${qr.map(row=>`<tr>${headers.map(h=>`<td>${row[h]||'—'}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`;
+    } else {
+      $('quarterlyContent').innerHTML = `<p class="text-gray-500 text-sm">Quarterly data unavailable. Visit <a href="https://www.screener.in/company/${d.symbol}/" target="_blank" class="text-blue-400 hover:underline">Screener.in</a> directly.</p>`;
+    }
+
+    // News
+    const news = d.news || [];
+    $('newsContent').innerHTML = news.length
+      ? news.map(n => newsItem(n,'text-blue-400')).join('')
+      : `<p class="text-gray-500 text-sm">No recent news found. Check <a href="https://www.moneycontrol.com" target="_blank" class="text-blue-400 hover:underline">Moneycontrol</a> or <a href="https://economictimes.indiatimes.com/markets" target="_blank" class="text-blue-400 hover:underline">ET Markets</a>.</p>`;
+
+    // Policy news
+    const policy = d.policy_news || [];
+    $('policyContent').innerHTML = policy.length
+      ? policy.map(n => newsItem(n,'text-purple-400')).join('')
+      : `<p class="text-gray-500 text-sm">No policy news found. Check <a href="https://rbi.org.in" target="_blank" class="text-purple-400 hover:underline">RBI</a> or <a href="https://sebi.gov.in" target="_blank" class="text-purple-400 hover:underline">SEBI</a>.</p>`;
+
+    // AI summary
+    const summary = d.ai_summary || 'AI analysis unavailable.';
+    $('aiSummaryContent').innerHTML = summary.split('\n\n').filter(p=>p.trim())
+      .map(p=>`<p class="mb-3">${p.trim()}</p>`).join('');
+
+    // Investment checklist
+    renderChecklist(d.checklist);
+
+    // Reference sites
+    $('refSitesContent').innerHTML = renderRefSites(d.reference_sites || []);
+
+    // Errors
+    const errs = d.errors || {};
+    const errKeys = Object.keys(errs);
+    $('errorsRow').classList.toggle('hidden', errKeys.length === 0);
+    if (errKeys.length > 0) {
+      $('errorsContent').innerHTML = errKeys
+        .map(k=>`<span class="error-chip">${k}: ${String(errs[k]).substring(0,60)}</span>`)
+        .join('');
+    }
+  }
+
+  // ── INVESTMENT CHECKLIST ─────────────────────────────────────────────────
+  const CHK_LABELS = {
+    market_cap_ok:          'Market Cap',
+    promoter_pledge_ok:     'Promoter Pledge',
+    de_ratio_ok:            'D/E Ratio',
+    interest_coverage_ok:   'Interest Coverage',
+    roce_ok:                'ROCE',
+    roe_ok:                 'ROE',
+    npm_ok:                 'Net Profit Margin',
+    opm_ok:                 'Operating Margin',
+    revenue_growth_ok:      'Revenue 5Y CAGR',
+    profit_growth_ok:       'Profit 5Y CAGR',
+    eps_growth_ok:          'EPS 5Y CAGR',
+    pe_vs_sector_ok:        'P/E vs Sector',
+    pb_ok:                  'P/B Ratio',
+    price_fcf_ok:           'Price / FCF',
+    promoter_holding_ok:    'Promoter Holding',
+    institutional_ok:       'FII + DII',
+    insider_selling_ok:     'Insider Selling',
+    accounting_ok:          'Accounting Quality',
+    cfo_positive_ok:        'Cash from Operations',
+    no_dilution_ok:         'Equity Dilution',
+    near_support_ok:        'Near Support / EMA',
+    not_overextended_ok:    'Not Overbought (RSI)',
+    volume_confirm_ok:      'Volume Confirmation',
+  };
+
+  function renderChecklist(cl) {
+    const el = $('checklistContent');
+    if (!cl || !cl.rating) {
+      el.innerHTML = `<p class="text-gray-500 text-sm">Checklist data unavailable — Screener.in data required.</p>`;
+      return;
+    }
+
+    const RATING_STYLE = {
+      'Strong Buy Zone': { bg:'rgba(16,185,129,0.12)', border:'rgba(16,185,129,0.4)',  text:'#10b981' },
+      'Watchlist':       { bg:'rgba(234,179,8,0.10)',  border:'rgba(234,179,8,0.35)',   text:'#fbbf24' },
+      'Caution':         { bg:'rgba(251,146,60,0.10)', border:'rgba(251,146,60,0.35)',  text:'#fb923c' },
+      'Avoid':           { bg:'rgba(239,68,68,0.10)',  border:'rgba(239,68,68,0.35)',   text:'#ef4444' },
+    };
+    const ratingKey = Object.keys(RATING_STYLE).find(k => cl.rating.includes(k)) || 'Caution';
+    const rs = RATING_STYLE[ratingKey];
+
+    const STAGE_KEYS = [
+      'stage1_safety','stage2_quality','stage3_growth',
+      'stage4_valuation','stage5_smartmoney','stage6_redflags','stage7_technical'
+    ];
+
+    const stagesHtml = STAGE_KEYS.map(key => {
+      const s = cl[key];
+      if (!s) return '';
+
+      const itemsHtml = Object.entries(s.items).map(([itemKey, item]) => {
+        const [icon, color] =
+          item.pass === null  ? ['—', '#6b7280'] :
+          item.pass === true  ? ['✓', '#10b981'] :
+                                ['✗', '#ef4444'];
+        const label = CHK_LABELS[itemKey] || itemKey.replace(/_ok$/, '').replace(/_/g, ' ');
+        return `<div class="chk-item">
+          <span class="chk-icon" style="color:${color};">${icon}</span>
+          <div style="min-width:0;">
+            <div style="font-size:0.6rem;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;margin-bottom:1px;">${label}</div>
+            <div class="chk-val">${item.value || 'N/A'}</div>
+            <div class="chk-thr">Target: ${item.threshold}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      const passStyle = s.pass
+        ? 'background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.3);'
+        : 'background:rgba(239,68,68,0.10);color:#ef4444;border:1px solid rgba(239,68,68,0.25);';
+      const stageBorderClr = s.pass ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.15)';
+      const stageBg        = s.pass ? 'rgba(16,185,129,0.04)' : 'rgba(239,68,68,0.04)';
+
+      return `<div style="background:${stageBg};border:1px solid ${stageBorderClr};border-radius:8px;padding:12px;">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold text-gray-300 uppercase tracking-wide">${s.label}</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-600">${s.score}/${s.total}</span>
+            <span style="${passStyle}padding:1px 8px;border-radius:4px;font-size:0.6rem;font-weight:700;">${s.pass ? 'PASS' : 'FAIL'}</span>
+          </div>
+        </div>
+        ${itemsHtml}
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="background:${rs.bg};border:2px solid ${rs.border};border-radius:10px;padding:14px 20px;margin-bottom:18px;text-align:center;">
+        <div style="font-size:1.5rem;font-weight:800;color:${rs.text};">${cl.rating}</div>
+        <div class="text-gray-400 text-sm mt-1">
+          ${cl.fundamental_pass} / 6 Fundamental Stages Passed
+          <span class="text-gray-600 mx-2">·</span>
+          ${cl.stages_passed} / ${cl.total_stages} Total Stages
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        ${stagesHtml}
+      </div>`;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key==='Enter' && document.activeElement===$('tickerInput')) analyzeStock();
+  });
+
+  // Auto-load symbol from URL query param (?symbol=RELIANCE)
+  window.addEventListener('load', () => {
+    const sym = new URLSearchParams(location.search).get('symbol');
+    if (sym) {
+      $('tickerInput').value = sym.toUpperCase();
+      analyzeStock();
+    }
+  });
+  </script>
+</body>
+</html>

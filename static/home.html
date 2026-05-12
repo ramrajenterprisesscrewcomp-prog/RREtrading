@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RRE Market Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0a0a12; font-family:'Segoe UI',system-ui,sans-serif; }
+    .card { background:#13131c; border:1px solid #1e1e30; border-radius:10px; }
+
+    /* Index ticker bar */
+    .idx-chip { display:flex; flex-direction:column; padding:4px 14px; border-right:1px solid #1e1e30; cursor:default; min-width:120px; }
+    .idx-chip:last-child { border-right:none; }
+    .idx-name  { font-size:0.58rem; color:#6b7280; text-transform:uppercase; letter-spacing:.06em; }
+    .idx-price { font-size:0.9rem; font-weight:700; color:#e2e8f0; }
+    .idx-chg   { font-size:0.7rem; font-weight:600; }
+
+    /* Mover rows */
+    .mover-row { display:grid; grid-template-columns:1fr auto auto auto; align-items:center; gap:8px;
+                 padding:6px 8px; border-radius:6px; font-size:0.72rem; }
+    .mover-row:hover { background:rgba(255,255,255,0.03); }
+    .mover-sym { font-weight:700; color:#e2e8f0; font-size:0.75rem; }
+    .mover-price { color:#94a3b8; text-align:right; }
+    .mover-pct  { font-weight:700; width:60px; text-align:right; }
+    .mover-vol  { color:#4b5563; font-size:0.62rem; text-align:right; width:52px; }
+ 
+    /* Buildup cards */
+    .bu-row { display:flex; align-items:center; justify-content:space-between;
+              padding:5px 8px; border-radius:5px; font-size:0.7rem; gap:6px; }
+    .bu-row:hover { background:rgba(255,255,255,0.03); }
+    .bu-sym  { font-weight:700; color:#e2e8f0; width:90px; }
+    .bu-price{ color:#6b7280; font-size:0.65rem; }
+    .bu-vals { display:flex; gap:8px; align-items:center; }
+    .bu-pct  { font-weight:600; width:52px; text-align:right; }
+    .bu-oi   { font-size:0.62rem; width:58px; text-align:right; }
+
+    /* OI table */
+    .oi-row  { display:grid; grid-template-columns:70px 1fr 1fr 55px 55px 55px; align-items:center;
+               gap:4px; padding:5px 6px; border-radius:5px; font-size:0.68rem; }
+    .oi-row:hover { background:rgba(255,255,255,0.03); }
+    .oi-bar  { height:6px; border-radius:3px; }
+
+    /* Sector chips */
+    .sec-chip { display:flex; flex-direction:column; gap:2px; padding:8px 10px;
+                background:#0d0d1a; border:1px solid #1e1e30; border-radius:8px; min-width:90px; }
+    .sec-bar  { height:3px; border-radius:2px; transition:width .3s; }
+
+    /* OI opinion card */
+    .oi-opin { background:#0d0d1a; border:1px solid #1e1e30; border-radius:8px; padding:12px 14px; }
+
+    /* Expiry select */
+    .exp-sel { background:#0d0d1a; border:1px solid #2d2d42; color:#94a3b8;
+               font-size:0.65rem; border-radius:5px; padding:2px 6px; cursor:pointer; }
+    .exp-sel:focus { outline:none; border-color:#4b5563; }
+    .exp-sel option { background:#0d0d1a; }
+
+    /* Global panel */
+    #globalPanel { position:fixed; top:0; right:-400px; width:380px; height:100vh;
+                   background:#0d0d1a; border-left:1px solid #1e1e30;
+                   transition:right .25s ease; z-index:200; overflow-y:auto; }
+    #globalPanel.open { right:0; }
+    .gm-row { display:flex; justify-content:space-between; align-items:center;
+              padding:5px 8px; border-radius:5px; font-size:0.72rem; }
+    .gm-row:hover { background:rgba(255,255,255,0.04); }
+    .gm-name { color:#cbd5e1; width:130px; }
+    .gm-price{ color:#94a3b8; width:80px; text-align:right; }
+    .gm-pct  { font-weight:700; width:70px; text-align:right; }
+
+
+    /* Sector tab buttons */
+    .sec-tab { padding:4px 14px; border-radius:6px; font-size:0.72rem; font-weight:600;
+               cursor:pointer; border:1px solid #1e1e30; color:#6b7280;
+               background:#0d0d1a; transition:all .15s; }
+    .sec-tab.active { background:rgba(99,102,241,0.2); border-color:rgba(99,102,241,0.5); color:#818cf8; }
+    .sec-tab:hover:not(.active) { border-color:#2d2d42; color:#94a3b8; }
+
+    /* Refresh pulse */
+    @keyframes pulse-ring { 0%{transform:scale(.9);opacity:1} 70%{transform:scale(1.6);opacity:0} 100%{opacity:0} }
+    .pulse-dot { position:relative; display:inline-block; width:8px; height:8px; }
+    .pulse-dot::after { content:''; position:absolute; inset:0; border-radius:50%;
+                        background:currentColor; animation:pulse-ring 1.5s ease-out infinite; }
+    .pulse-dot::before { content:''; position:absolute; inset:0; border-radius:50%; background:currentColor; }
+
+    ::-webkit-scrollbar { width:4px; height:4px; }
+    ::-webkit-scrollbar-track { background:#0a0a12; }
+    ::-webkit-scrollbar-thumb { background:#2d2d42; border-radius:2px; }
+    .section-hdr { font-size:0.62rem; font-weight:700; letter-spacing:.09em;
+                   text-transform:uppercase; color:#6b7280; margin-bottom:8px; }
+
+    /* Sector Analysis */
+    .rrg-badge { display:inline-block; font-size:0.6rem; font-weight:700;
+                 padding:1px 6px; border-radius:4px; letter-spacing:.04em; }
+    .rrg-Leading   { background:rgba(16,185,129,0.18); color:#10b981; }
+    .rrg-Improving { background:rgba(59,130,246,0.18); color:#60a5fa; }
+    .rrg-Weakening { background:rgba(245,158,11,0.18); color:#f59e0b; }
+    .rrg-Lagging   { background:rgba(239,68,68,0.18);  color:#ef4444; }
+
+    .sa-row { display:grid; align-items:center; gap:4px; padding:5px 6px;
+              border-radius:5px; font-size:0.68rem; cursor:default; }
+    .sa-row:hover { background:rgba(255,255,255,0.03); }
+
+    .score-pill { display:inline-block; min-width:24px; text-align:center;
+                  font-size:0.6rem; font-weight:700; padding:1px 5px;
+                  border-radius:10px; }
+
+    .rec-box { border-radius:8px; padding:14px 16px; }
+    .rec-BUY        { background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); }
+    .rec-ACCUMULATE { background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); }
+    .rec-WAIT       { background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); }
+    .rec-AVOID      { background:rgba(239,68,68,0.1);  border:1px solid rgba(239,68,68,0.3); }
+
+    .mini-bar { height:4px; border-radius:2px; margin-top:2px; }
+
+    /* Sector Analysis timeframe tabs */
+    .sa-tab { padding:3px 12px; border-radius:6px; font-size:0.7rem; font-weight:600;
+               cursor:pointer; border:1px solid #1e1e30; color:#6b7280;
+               background:#0d0d1a; transition:all .15s; }
+    .sa-tab.active { background:rgba(167,139,250,0.2); border-color:rgba(167,139,250,0.5); color:#a78bfa; }
+    .sa-tab:hover:not(.active) { border-color:#2d2d42; color:#94a3b8; }
+
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<!-- ═══════════════════════ STICKY INDEX BAR ═══════════════════════════ -->
+<div id="indexBar" style="background:#0d0d18;border-bottom:1px solid #1e1e30;"
+     class="sticky top-0 z-50 flex items-stretch overflow-x-auto">
+
+  <!-- Brand -->
+  <div class="flex items-center gap-3 px-4 shrink-0 border-r border-gray-800">
+    <a href="/" class="text-emerald-400 font-bold text-lg tracking-tight whitespace-nowrap">RRE</a>
+    <span class="text-gray-600 text-xs hidden sm:inline">Market</span>
+  </div>
+
+  <!-- Live index chips (filled by JS) -->
+  <div id="indexChips" class="flex flex-1 overflow-x-auto"></div>
+
+  <!-- Right controls -->
+  <div class="flex items-center gap-2 px-3 shrink-0 border-l border-gray-800">
+    <span id="mktBadge" class="text-xs font-bold px-2 py-0.5 rounded-full hidden"></span>
+    <button id="globalBtn" onclick="toggleGlobal()"
+      style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#818cf8;"
+      class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity whitespace-nowrap">
+      🌍 Global
+    </button>
+    <a href="/analyze"
+      style="background:#10b981;color:#fff;"
+      class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity whitespace-nowrap">
+      Stock Analysis →
+    </a>
+  </div>
+</div>
+
+<!-- ═══════════════════════ GLOBAL MARKETS PANEL ═══════════════════════ -->
+<div id="globalPanel">
+  <div class="flex items-center justify-between px-4 py-3 sticky top-0"
+       style="background:#0d0d1a;border-bottom:1px solid #1e1e30;">
+    <span class="text-sm font-bold text-gray-200">🌍 Global Markets</span>
+    <div class="flex items-center gap-3">
+      <span id="globalTs" class="text-xs text-gray-600"></span>
+      <button onclick="toggleGlobal()" class="text-gray-500 hover:text-gray-300 text-lg leading-none">✕</button>
+    </div>
+  </div>
+  <div id="globalContent" class="p-4">
+    <p class="text-gray-500 text-sm text-center py-8">Loading…</p>
+  </div>
+</div>
+<div id="globalOverlay" onclick="toggleGlobal()"
+     class="hidden fixed inset-0 z-10" style="background:rgba(0,0,0,0.4);"></div>
+
+
+<!-- ═══════════════════════ MAIN CONTENT ═══════════════════════════════ -->
+<div class="max-w-screen-2xl mx-auto px-3 py-4">
+
+  <!-- Refresh status bar -->
+  <div class="flex items-center justify-between mb-3 text-xs text-gray-600">
+    <div class="flex items-center gap-2">
+      <span class="pulse-dot text-emerald-500" id="liveDot"></span>
+      <span id="refreshStatus">Connecting…</span>
+    </div>
+    <span id="lastUpdate" class="text-gray-700"></span>
+  </div>
+
+  <!-- ROW 1: Gainers | Losers -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+
+    <!-- Gainers -->
+    <div class="card p-4">
+      <div class="section-hdr text-emerald-600">▲ Top Gainers Today · F&amp;O Universe</div>
+      <div class="grid grid-cols-4 gap-2 text-xs text-gray-600 mb-1 px-2">
+        <span>Symbol</span><span class="text-right">Price</span>
+        <span class="text-right">Change %</span><span class="text-right">Volume</span>
+      </div>
+      <div id="gainersContent"><p class="text-gray-600 text-xs text-center py-4">Loading…</p></div>
+    </div>
+
+    <!-- Losers -->
+    <div class="card p-4">
+      <div class="section-hdr text-red-600">▼ Top Losers Today · F&amp;O Universe</div>
+      <div class="grid grid-cols-4 gap-2 text-xs text-gray-600 mb-1 px-2">
+        <span>Symbol</span><span class="text-right">Price</span>
+        <span class="text-right">Change %</span><span class="text-right">Volume</span>
+      </div>
+      <div id="losersContent"><p class="text-gray-600 text-xs text-center py-4">Loading…</p></div>
+    </div>
+  </div>
+
+  <!-- ROW 2: F&O OI Buildup (3 cols) -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+
+    <div class="card p-4">
+      <div class="section-hdr text-emerald-500">🟢 Long Buildup</div>
+      <div class="text-xs text-gray-700 mb-2">▲ OI + ▲ Price · Fresh longs</div>
+      <div id="buLongBuildup"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="section-hdr text-red-500">🔴 Short Buildup</div>
+      <div class="text-xs text-gray-700 mb-2">▲ OI + ▼ Price · Fresh shorts</div>
+      <div id="buShortBuildup"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+
+    <div class="card p-4">
+      <div class="section-hdr text-teal-500">🟩 Short Covering</div>
+      <div class="text-xs text-gray-700 mb-2">▼ OI + ▲ Price · Shorts exiting</div>
+      <div id="buShortCovering"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+  </div>
+
+  <!-- ROW 2b: TSR Pro Screeners (Long Buildup · Fresh Shorts · Short Covering · PCR · Signals) -->
+  <div id="tsrRow" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mb-3" style="display:none!important;">
+    <div class="card p-4">
+      <div class="flex items-center gap-2 mb-1">
+        <div class="section-hdr text-emerald-400 mb-0">📈 Long Buildup</div>
+        <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:rgba(99,102,241,0.15);color:#818cf8;font-size:0.58rem;">TSR Pro</span>
+      </div>
+      <div class="text-xs text-gray-700 mb-2">Position Build Up · Near Month Futures</div>
+      <div id="tsrLongBuildup"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+    <div class="card p-4">
+      <div class="flex items-center gap-2 mb-1">
+        <div class="section-hdr text-red-400 mb-0">📉 Fresh Shorts</div>
+        <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:rgba(99,102,241,0.15);color:#818cf8;font-size:0.58rem;">TSR Pro</span>
+      </div>
+      <div class="text-xs text-gray-700 mb-2">New Short Positions · Near Month Futures</div>
+      <div id="tsrShortBuildup"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+    <div class="card p-4">
+      <div class="flex items-center gap-2 mb-1">
+        <div class="section-hdr text-teal-400 mb-0">🔄 Short Covering</div>
+        <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:rgba(99,102,241,0.15);color:#818cf8;font-size:0.58rem;">TSR Pro</span>
+      </div>
+      <div class="text-xs text-gray-700 mb-2">Shorts Exiting · Near Month Futures</div>
+      <div id="tsrShortCovering"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+    <div class="card p-4">
+      <div class="flex items-center gap-2 mb-1">
+        <div class="section-hdr text-purple-400 mb-0">📊 High PCR Stocks</div>
+        <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:rgba(99,102,241,0.15);color:#818cf8;font-size:0.58rem;">TSR Pro</span>
+      </div>
+      <div class="text-xs text-gray-700 mb-2">High Put-Call Ratio · Bullish Bias</div>
+      <div id="tsrPcr"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+    <div class="card p-4 sm:col-span-2 xl:col-span-2">
+      <div class="flex items-center gap-2 mb-1">
+        <div class="section-hdr text-yellow-400 mb-0">⚡ Breakout Signals</div>
+        <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:rgba(99,102,241,0.15);color:#818cf8;font-size:0.58rem;">TSR Pro</span>
+      </div>
+      <div class="text-xs text-gray-700 mb-2">30-Day Resistance Breakout · Price Action</div>
+      <div id="tsrSignals"><p class="text-gray-600 text-xs text-center py-3">Loading…</p></div>
+    </div>
+  </div>
+
+  <!-- ROW 3: Nifty OI Monthly + OI Opinion -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+
+    <!-- Monthly OI -->
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <div class="flex items-center gap-2">
+            <div class="section-hdr text-purple-500 mb-0">Nifty OI · Monthly Expiry</div>
+            <span id="oiStaleTag" class="hidden text-xs font-bold px-2 py-0.5 rounded"
+                  style="background:rgba(245,158,11,0.15);color:#f59e0b;font-size:0.6rem;">Last Session</span>
+            <span id="oiSourceTag" class="hidden text-xs font-bold px-2 py-0.5 rounded"
+                  style="background:rgba(99,102,241,0.15);color:#818cf8;font-size:0.6rem;">Angel One</span>
+          </div>
+          <div id="monthlyExpLabel" class="text-xs text-gray-500 mt-0.5"></div>
+        </div>
+        <div class="flex flex-col items-end gap-1">
+          <select id="monthlyExpSelect" class="exp-sel" onchange="changeExpiry('monthly', this.value)">
+            <option value="">Loading…</option>
+          </select>
+          <div id="monthlyUnder" class="text-right">
+            <div class="text-xs text-gray-600">Spot</div>
+            <div class="text-sm font-bold text-purple-400"></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid text-xs text-gray-600 mb-1 px-1"
+           style="grid-template-columns:70px 1fr 1fr 55px 55px 55px;gap:4px;">
+        <span>Strike</span><span class="text-center">CE OI</span><span class="text-center">PE OI</span>
+        <span class="text-right">CE Chg</span><span class="text-right">PE Chg</span><span class="text-right">Bias</span>
+      </div>
+      <div id="monthlyOiContent"><p class="text-gray-600 text-xs text-center py-4">Loading…</p></div>
+    </div>
+
+    <!-- OI Market Opinion -->
+    <div class="card p-4">
+      <div class="section-hdr text-sky-500 mb-3">OI Market Opinion · Nifty</div>
+      <div id="oiOpinionContent">
+        <p class="text-gray-600 text-xs text-center py-8">Loading…</p>
+      </div>
+      <div class="mt-3 text-gray-700" style="font-size:0.57rem;border-top:1px solid #1e1e30;padding-top:6px;">
+        OI Sources: NSE · OptionsFlow · Monetry · AlgoStraddle · StrikeVue
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 4: Sector Rotation with timeframe tabs -->
+  <div class="card p-4 mb-4">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div class="section-hdr mb-0" style="color:#818cf8;">Sector Rotation · Multi-Timeframe</div>
+      <div class="flex gap-2">
+        <button class="sec-tab active" id="tab1d" onclick="switchSectorTab('1d')">1D</button>
+        <button class="sec-tab" id="tab1w" onclick="switchSectorTab('1w')">1W</button>
+        <button class="sec-tab" id="tab1m" onclick="switchSectorTab('1m')">1M</button>
+        <button class="sec-tab" id="tab3m" onclick="switchSectorTab('3m')">3M</button>
+      </div>
+    </div>
+    <div id="sectorContent" class="flex flex-wrap gap-2">
+      <p class="text-gray-600 text-xs text-center py-3 w-full">Loading…</p>
+    </div>
+    <div class="mt-3 text-gray-700" style="font-size:0.58rem;border-top:1px solid #1e1e30;padding-top:6px;">
+      Sources: NSE India · Yahoo Finance (^CNX index symbols)
+    </div>
+  </div>
+
+  <!-- ROW 5: Sector Rotation Analysis (5-factor) -->
+  <div class="card p-4 mb-4" id="sectorAnalysisCard">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <div class="section-hdr mb-0" style="color:#a78bfa;">
+          📡 Sector Rotation Analysis · 5-Factor
+        </div>
+        <div class="text-xs text-gray-600 mt-0.5">
+          RS · RRG · ADX · Volume · Breadth
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button class="sa-tab active" id="saTabDaily"   onclick="switchSaTab('daily')">Daily</button>
+        <button class="sa-tab"        id="saTabWeekly"  onclick="switchSaTab('weekly')">Weekly</button>
+        <button class="sa-tab"        id="saTabMonthly" onclick="switchSaTab('monthly')">Monthly</button>
+        <button onclick="loadSectorAnalysis(true)"
+                style="background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.3);color:#a78bfa;"
+                class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity">
+          ↻ Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Recommendation box -->
+    <div id="saRecommendation" class="mb-3">
+      <p class="text-gray-600 text-xs text-center py-3">Loading analysis…</p>
+    </div>
+
+    <!-- Sector table -->
+    <div class="overflow-x-auto">
+      <div id="saTableHeader"
+           class="grid text-xs text-gray-600 mb-1 px-1"
+           style="grid-template-columns:72px 55px 48px 76px 50px 46px 58px 36px 80px;gap:4px;display:none;">
+        <span>Sector</span>
+        <span class="text-right">Price</span>
+        <span class="text-right">1D%</span>
+        <span class="text-center">RRG</span>
+        <span class="text-right">ADX</span>
+        <span class="text-right">Vol×</span>
+        <span class="text-right">Breadth</span>
+        <span class="text-right">Score</span>
+        <span class="text-center">Rating</span>
+      </div>
+      <div id="saSectorList">
+        <p class="text-gray-600 text-xs text-center py-3">Loading…</p>
+      </div>
+    </div>
+    <div class="mt-2 text-gray-700" style="font-size:0.57rem;border-top:1px solid #1e1e30;padding-top:6px;">
+      RS = Sector/Nifty relative strength · RRG quadrant from RS-Ratio &amp; RS-Momentum ·
+      ADX 14-period Wilder · Volume vs 20d avg · Breadth from NSE constituents
+    </div>
+  </div>
+
+  <!-- ROW 6: Live Pivot Signals · Nifty 200 -->
+  <div class="card p-4 mb-4" id="pivotCard">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <div class="section-hdr mb-0" style="color:#10b981;">
+          📡 Live Pivot Signals · Nifty 200
+        </div>
+        <div id="pivotMeta" class="text-xs text-gray-600 mt-0.5">
+          PP = (H+L+C)/3 · R1 = 2×PP−L · S1 = 2×PP−H · Based on previous session OHLC
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span id="pivotScanCount" class="text-xs text-gray-600"></span>
+        <button onclick="loadPivotSignals(true)"
+                style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);color:#10b981;"
+                class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity">
+          ↻ Scan
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <!-- Bullish column -->
+      <div>
+        <div class="text-xs font-bold mb-2 uppercase tracking-wide" style="color:#10b981;">
+          🟢 R1 Breakout · Bullish
+        </div>
+        <div class="grid text-xs text-gray-600 mb-1 px-1"
+             style="grid-template-columns:78px 64px 54px 54px 54px 44px;gap:3px;">
+          <span>Symbol</span>
+          <span class="text-right">LTP</span>
+          <span class="text-right">R1 ✅</span>
+          <span class="text-right">R2 🎯</span>
+          <span class="text-right">PP</span>
+          <span class="text-right">+%</span>
+        </div>
+        <div id="pivotBullish">
+          <p class="text-gray-600 text-xs text-center py-4">Click ↻ Scan to load</p>
+        </div>
+      </div>
+
+      <!-- Bearish column -->
+      <div>
+        <div class="text-xs font-bold mb-2 uppercase tracking-wide" style="color:#ef4444;">
+          🔴 S1 Breakdown · Bearish
+        </div>
+        <div class="grid text-xs text-gray-600 mb-1 px-1"
+             style="grid-template-columns:78px 64px 54px 54px 54px 44px;gap:3px;">
+          <span>Symbol</span>
+          <span class="text-right">LTP</span>
+          <span class="text-right">S1 ⚠️</span>
+          <span class="text-right">S2 🎯</span>
+          <span class="text-right">PP</span>
+          <span class="text-right">-%</span>
+        </div>
+        <div id="pivotBearish">
+          <p class="text-gray-600 text-xs text-center py-4">Click ↻ Scan to load</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-2 text-gray-700" style="font-size:0.57rem;border-top:1px solid #1e1e30;padding-top:6px;">
+      PP=(H+L+C)/3 · R1=2×PP−L · R2=PP+(H−L) · S1=2×PP−H · S2=PP−(H−L) · Previous session OHLC (Yahoo Finance) · Live LTP from NSE · Telegram alerts fire once per signal per day
+    </div>
+  </div>
+
+  <!-- ROW 7: AI Stock Recommendations -->
+  <div class="card p-4 mb-4" id="recCard">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <div class="section-hdr mb-0" style="color:#f59e0b;">🎯 AI Stock Recommendations</div>
+        <div id="recSubtitle" class="text-xs text-gray-600 mt-0.5">6-factor pre-analysis · NSE live prices · TSR Pro cross-check · AI Synthesis</div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span id="recTs" class="text-xs text-gray-600"></span>
+        <span id="recCount" class="text-xs text-gray-600"></span>
+        <span id="recDataBadge" class="hidden text-xs font-bold px-2 py-0.5 rounded"
+              style="background:rgba(16,185,129,0.12);color:#10b981;border:1px solid rgba(16,185,129,0.25);"></span>
+        <button onclick="loadRecommendations(true)"
+                style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);color:#f59e0b;"
+                class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity">
+          ↻ Analyse
+        </button>
+        <button id="recPdfBtn" onclick="sendRecPdf()"
+                style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);color:#818cf8;"
+                class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity">
+          📤 Send PDF
+        </button>
+      </div>
+    </div>
+
+    <!-- Market thesis -->
+    <div id="recThesis" class="mb-3 p-3 rounded-lg text-xs text-gray-300"
+         style="background:#0d0d1a;border:1px solid #1e1e30;line-height:1.7;">
+      <p class="text-gray-600 text-center py-2">Click ↻ Analyse to start 6-factor AI analysis…</p>
+    </div>
+
+    <!-- Pre-analysis summary: 5 factors -->
+    <div id="recPreAnalysis" class="hidden grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2 mb-3">
+    </div>
+
+    <!-- Active macro indicators strip -->
+    <div id="recMacroStrip" class="flex flex-wrap gap-2 mb-3"></div>
+
+    <!-- Recommendations grid -->
+    <div id="recGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-3">
+    </div>
+
+    <!-- Stocks to avoid -->
+    <div id="recAvoidSection" class="hidden mb-3">
+      <div class="section-hdr text-red-500 mt-1 mb-2">🚫 Stocks to Avoid</div>
+      <div id="recAvoidList" class="flex flex-col gap-1.5"></div>
+    </div>
+
+    <!-- Watchlist -->
+    <div id="recWatchlist" class="mb-1"></div>
+
+    <div class="mt-2 text-gray-700"
+         style="font-size:0.57rem;border-top:1px solid #1e1e30;padding-top:6px;">
+      Pre-analysis: Commodity correlations · Geopolitical themes · F&amp;O OI sentiment · Sector rotation · Nifty beta · Synthesis via GPT-4o · Cached 30 min
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <p class="text-center text-xs text-gray-700 pb-4">
+    Data: NSE India · Yahoo Finance · Screener.in · OpenAI · Refreshes every 10s
+  </p>
+
+</div><!-- /container -->
+
+<script>
+// ── HELPERS ──────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function fmt(n, d=2) {
+  if (n == null || isNaN(Number(n))) return 'N/A';
+  return Number(n).toLocaleString('en-IN', {minimumFractionDigits:d, maximumFractionDigits:d});
+}
+function fmtUSD(n, d=0) {
+  if (n == null || isNaN(Number(n))) return 'N/A';
+  return Number(n).toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d});
+}
+function fmtOI(n) {
+  if (n == null) return 'N/A';
+  n = Number(n);
+  if (n >= 1e7) return (n/1e7).toFixed(2)+' Cr';
+  if (n >= 1e5) return (n/1e5).toFixed(2)+' L';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+' K';
+  return n;
+}
+function fmtVol(n) {
+  if (!n) return '—';
+  if (n >= 1e7) return (n/1e7).toFixed(1)+'Cr';
+  if (n >= 1e5) return (n/1e5).toFixed(1)+'L';
+  return String(n);
+}
+function clr(v) { return Number(v) >= 0 ? '#10b981' : '#ef4444'; }
+function arrow(v) { return Number(v) >= 0 ? '▲' : '▼'; }
+function sign(v) { return Number(v) >= 0 ? '+' : ''; }
+
+function relTime(published) {
+  if (!published) return '';
+  try {
+    const d = new Date(published);
+    if (isNaN(d)) return '';
+    const diff = Math.floor((Date.now() - d) / 60000);
+    if (diff < 1)  return 'just now';
+    if (diff < 60) return `${diff}m ago`;
+    const h = Math.floor(diff / 60);
+    if (h < 24)    return `${h}h ago`;
+    return `${Math.floor(h/24)}d ago`;
+  } catch(e) { return ''; }
+}
+
+// ── INDEX BAR ────────────────────────────────────────────────────────────
+const IDX_ORDER = [
+  ['nifty50','NIFTY 50'],['banknifty','BANK NIFTY'],['sensex','SENSEX'],
+  ['midcap100','MIDCAP 100'],['niftynext50','NEXT 50'],['niftyit','NIFTY IT'],
+  ['indiavix','INDIA VIX'],['btc','BITCOIN'],
+];
+
+function renderIndexBar(indices) {
+  const chips = IDX_ORDER
+    .filter(([k]) => indices[k])
+    .map(([k, label]) => {
+      const idx = indices[k];
+      const pch = Number(idx.pchange || 0);
+      const c   = pch >= 0 ? '#10b981' : '#ef4444';
+      const isBtc = k === 'btc';
+      const priceStr = isBtc
+        ? '$' + fmtUSD(idx.value, 0)
+        : fmt(idx.value, 0);
+      const changeStr = isBtc
+        ? (idx.change != null ? (sign(idx.change) + '$' + fmtUSD(Math.abs(idx.change), 0)) : '')
+        : (sign(idx.change) + fmt(idx.change, 0));
+      return `<div class="idx-chip">
+        <span class="idx-name">${label}</span>
+        <span class="idx-price">${priceStr}</span>
+        <span class="idx-chg" style="color:${c};">${arrow(pch)} ${fmt(Math.abs(pch), 2)}%
+          <span style="color:#4b5563;font-weight:400;"> ${changeStr}</span>
+        </span>
+      </div>`;
+    }).join('');
+  $('indexChips').innerHTML = chips || '<span class="text-xs text-gray-600 px-4 self-center">Index data unavailable</span>';
+}
+
+function renderMktBadge(isOpen) {
+  const b = $('mktBadge');
+  b.classList.remove('hidden');
+  if (isOpen) {
+    b.style.cssText = 'background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);';
+    b.textContent = '● Market Open';
+  } else {
+    b.style.cssText = 'background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.25);';
+    b.textContent = '◉ Market Closed';
+  }
+}
+
+// ── MOVERS ───────────────────────────────────────────────────────────────
+function moverRow(s, isGainer) {
+  const pch = Number(s.pChange || 0);
+  const c   = isGainer ? '#10b981' : '#ef4444';
+  return `<div class="mover-row" style="cursor:pointer;" onclick="goAnalyze('${s.symbol}')">
+    <span class="mover-sym">${s.symbol}</span>
+    <span class="mover-price">₹${fmt(s.lastPrice)}</span>
+    <span class="mover-pct" style="color:${c};">${sign(pch)}${fmt(pch, 2)}%</span>
+    <span class="mover-vol">${fmtVol(s.volume)}</span>
+  </div>`;
+}
+
+// ── BUILDUP SECTION ───────────────────────────────────────────────────────
+const BU_META = {
+  'Long Buildup':   { id:'buLongBuildup',   pColor:'#10b981', oColor:'#10b981' },
+  'Short Buildup':  { id:'buShortBuildup',  pColor:'#ef4444', oColor:'#ef4444' },
+  'Short Covering': { id:'buShortCovering', pColor:'#10b981', oColor:'#ef4444' },
+};
+
+function renderBuildup(buildup) {
+  for (const [cat, meta] of Object.entries(BU_META)) {
+    const stocks = (buildup || {})[cat] || [];
+    if (!stocks.length) {
+      $(meta.id).innerHTML = '<p class="text-gray-600 text-xs text-center py-3">No signals</p>';
+      continue;
+    }
+    $(meta.id).innerHTML = stocks.map(s => {
+      const pc  = Number(s.pChange || 0);
+      const oic = Number(s.oi_chg_pct || 0);
+      return `<div class="bu-row" style="cursor:pointer;" onclick="goAnalyze('${s.symbol}')">
+        <span class="bu-sym">${s.symbol}</span>
+        <div class="bu-vals">
+          <span class="bu-pct" style="color:${meta.pColor};">${sign(pc)}${fmt(Math.abs(pc),2)}%</span>
+          <span class="bu-oi" style="color:${meta.oColor};">OI ${sign(oic)}${fmt(Math.abs(oic),1)}%</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+}
+
+// ── NIFTY OI TABLE ───────────────────────────────────────────────────────
+function oiRow(row, maxOI, spotPrice) {
+  const ceOI  = row.ce_oi  || 0;
+  const peOI  = row.pe_oi  || 0;
+  const ceChg = row.ce_chg || 0;
+  const peChg = row.pe_chg || 0;
+  const cePct = Math.round(ceOI / maxOI * 100);
+  const pePct = Math.round(peOI / maxOI * 100);
+  const isAtm = spotPrice && Math.abs(row.strike - spotPrice) < spotPrice * 0.01;
+  const bias  = peOI > ceOI * 1.2 ? 'PE↑' : ceOI > peOI * 1.2 ? 'CE↑' : '~';
+  const biasC = bias === 'PE↑' ? '#10b981' : bias === 'CE↑' ? '#ef4444' : '#6b7280';
+
+  return `<div class="oi-row" style="${isAtm ? 'background:rgba(234,179,8,0.06);border-radius:5px;' : ''}">
+    <span style="font-size:0.72rem;font-weight:${isAtm?'700':'500'};color:${isAtm?'#fbbf24':'#94a3b8'};">${row.strike}</span>
+    <div title="CE OI: ${fmtOI(ceOI)}">
+      <div class="oi-bar" style="width:${cePct}%;background:#ef4444;min-width:2px;max-width:100%;"></div>
+      <div style="font-size:0.6rem;color:#9ca3af;margin-top:1px;">${fmtOI(ceOI)}</div>
+    </div>
+    <div title="PE OI: ${fmtOI(peOI)}">
+      <div class="oi-bar" style="width:${pePct}%;background:#10b981;min-width:2px;max-width:100%;"></div>
+      <div style="font-size:0.6rem;color:#9ca3af;margin-top:1px;">${fmtOI(peOI)}</div>
+    </div>
+    <span style="font-size:0.62rem;text-align:right;color:${ceChg>=0?'#10b981':'#ef4444'};">${sign(ceChg)}${fmtOI(Math.abs(ceChg))}</span>
+    <span style="font-size:0.62rem;text-align:right;color:${peChg>=0?'#10b981':'#ef4444'};">${sign(peChg)}${fmtOI(Math.abs(peChg))}</span>
+    <span style="font-size:0.65rem;font-weight:700;text-align:right;color:${biasC};">${bias}</span>
+  </div>`;
+}
+
+function renderOiBox(strikes, contentId, expLabel, labelId, underlying, underEl, isStale) {
+  $(labelId).textContent = expLabel ? `Expiry: ${expLabel}` : '';
+  if (underEl && underlying) {
+    underEl.querySelector('div:last-child').textContent = `₹${fmt(underlying, 0)}`;
+  }
+  if (!strikes || !strikes.length) {
+    $(contentId).innerHTML = '<p class="text-gray-600 text-xs text-center py-4">No OI data available</p>';
+    return;
+  }
+  const maxOI = Math.max(...strikes.map(r => Math.max(r.ce_oi||0, r.pe_oi||0)), 1);
+  $(contentId).innerHTML = strikes.map(r => oiRow(r, maxOI, underlying)).join('');
+}
+
+// ── EXPIRY DROPDOWNS ──────────────────────────────────────────────────────
+let _allExpiryDates = [];
+
+function populateExpirySelects(allDates, weeklyExp, monthlyExp) {
+  _allExpiryDates = allDates || [];
+  const sel = $('monthlyExpSelect');
+  sel.innerHTML = _allExpiryDates.map(d =>
+    `<option value="${d}"${d === monthlyExp ? ' selected' : ''}>${d}</option>`
+  ).join('') || '<option value="">No data</option>';
+}
+
+async function changeExpiry(box, expiry) {
+  const contentId = box === 'weekly' ? 'weeklyOiContent' : 'monthlyOiContent';
+  const labelId   = box === 'weekly' ? 'weeklyExpLabel'  : 'monthlyExpLabel';
+  const underEl   = $(box === 'weekly' ? 'weeklyUnder' : 'monthlyUnder');
+  $(contentId).innerHTML = '<p class="text-gray-600 text-xs text-center py-4">Loading…</p>';
+  try {
+    const r = await fetch(`/api/nifty-oi?symbol=NIFTY&expiry=${encodeURIComponent(expiry)}`);
+    const d = await r.json();
+    renderOiBox(d.strikes, contentId, d.expiry, labelId, d.underlying, underEl, d.is_stale);
+    renderOiOpinion(d.oi_opinion);
+    const staleTag  = $('oiStaleTag');
+    const sourceTag = $('oiSourceTag');
+    if (d.is_stale && d.stale_label) {
+      staleTag.textContent = d.stale_label;
+      staleTag.classList.remove('hidden');
+      sourceTag.classList.add('hidden');
+    } else if (d.source === 'Angel One') {
+      sourceTag.classList.remove('hidden');
+      staleTag.classList.add('hidden');
+    } else {
+      staleTag.classList.add('hidden');
+      sourceTag.classList.add('hidden');
+    }
+  } catch(e) {
+    $(contentId).innerHTML = `<p class="text-red-400 text-xs text-center py-4">Error: ${e.message}</p>`;
+  }
+}
+
+// ── OI OPINION ────────────────────────────────────────────────────────────
+function renderOiOpinion(op) {
+  if (!op || !op.sentiment) {
+    $('oiOpinionContent').innerHTML = '<p class="text-gray-600 text-xs text-center py-8">Insufficient OI data</p>';
+    return;
+  }
+  const sentColor = {
+    'Bullish':        '#10b981',
+    'Mildly Bullish': '#34d399',
+    'Neutral':        '#f59e0b',
+    'Mildly Bearish': '#fb923c',
+    'Bearish':        '#ef4444',
+  }[op.sentiment] || '#94a3b8';
+
+  const pcrBar = Math.min(op.pcr * 50, 100);
+  const pcrColor = op.pcr > 1.2 ? '#10b981' : op.pcr < 0.8 ? '#ef4444' : '#f59e0b';
+
+  $('oiOpinionContent').innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="text-xs text-gray-500 uppercase tracking-wide mb-1">Market Bias</div>
+        <div style="color:${sentColor};font-size:1.05rem;font-weight:700;">${op.sentiment}</div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-gray-500 mb-1">PCR</div>
+        <div style="color:${pcrColor};font-size:1.1rem;font-weight:700;">${op.pcr}</div>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <div class="flex justify-between text-xs text-gray-500 mb-1">
+        <span>Bearish</span><span>PCR Gauge</span><span>Bullish</span>
+      </div>
+      <div style="background:#1e1e30;height:6px;border-radius:3px;overflow:hidden;">
+        <div style="width:${pcrBar}%;background:${pcrColor};height:100%;border-radius:3px;transition:width .4s;"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 mb-3">
+      <div class="oi-opin">
+        <div class="text-xs text-gray-500 mb-1">Support (Max PE OI)</div>
+        <div class="text-emerald-400 font-bold text-sm">₹${fmt(op.support, 0)}</div>
+      </div>
+      <div class="oi-opin">
+        <div class="text-xs text-gray-500 mb-1">Resistance (Max CE OI)</div>
+        <div class="text-red-400 font-bold text-sm">₹${fmt(op.resistance, 0)}</div>
+      </div>
+    </div>
+
+    <div class="oi-opin mb-2">
+      <div class="text-xs text-gray-500 mb-1">Writer Activity</div>
+      <div class="text-gray-300 text-xs">${op.writer_bias || '—'}</div>
+    </div>
+
+    ${(op.fresh_resistance || op.fresh_support) ? `
+    <div style="border-top:1px solid #1e1e30;margin-top:10px;padding-top:10px;">
+      <div class="text-xs font-bold mb-2" style="color:#818cf8;letter-spacing:.05em;text-transform:uppercase;">
+        ⚡ Fresh OI Buildup
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="oi-opin">
+          <div class="text-xs text-gray-500 mb-1">New Resistance</div>
+          ${op.fresh_resistance
+            ? `<div class="text-red-400 font-bold text-sm">₹${fmt(op.fresh_resistance, 0)}</div>
+               <div class="text-xs text-gray-600 mt-0.5">+${fmtOI(op.fresh_ce_chg)} CE OI added</div>`
+            : `<div class="text-gray-600 text-xs">No fresh CE buildup</div>`}
+        </div>
+        <div class="oi-opin">
+          <div class="text-xs text-gray-500 mb-1">New Support</div>
+          ${op.fresh_support
+            ? `<div class="text-emerald-400 font-bold text-sm">₹${fmt(op.fresh_support, 0)}</div>
+               <div class="text-xs text-gray-600 mt-0.5">+${fmtOI(op.fresh_pe_chg)} PE OI added</div>`
+            : `<div class="text-gray-600 text-xs">No fresh PE buildup</div>`}
+        </div>
+      </div>
+    </div>` : ''}
+
+    <div class="flex justify-between text-xs text-gray-600 mt-3 pt-2" style="border-top:1px solid #1e1e30;">
+      <span>Total CE OI: <span class="text-red-400">${fmtOI(op.total_ce_oi)}</span></span>
+      <span>Total PE OI: <span class="text-emerald-400">${fmtOI(op.total_pe_oi)}</span></span>
+    </div>
+  `;
+}
+
+// ── SECTOR ROTATION (MULTI-TIMEFRAME) ────────────────────────────────────
+let _sectorMultiData = [];
+let _activeSectorTab = '1d';
+
+const SECTOR_TAB_FIELD = {
+  '1d': 'pchange_1d',
+  '1w': 'pchange_1w',
+  '1m': 'pchange_1m',
+  '3m': 'pchange_3m',
+};
+
+function switchSectorTab(tab) {
+  _activeSectorTab = tab;
+  // Update button states
+  ['1d','1w','1m','3m'].forEach(t => {
+    const btn = $('tab' + t);
+    if (btn) {
+      btn.classList.toggle('active', t === tab);
+    }
+  });
+  renderSectorChips(_sectorMultiData, SECTOR_TAB_FIELD[tab]);
+}
+
+function renderSectorChips(sectors, field) {
+  if (!sectors || !sectors.length) {
+    $('sectorContent').innerHTML = '<p class="text-gray-600 text-xs text-center py-3 w-full">No sector data</p>';
+    return;
+  }
+
+  // Sort by selected field, nulls last
+  const sorted = [...sectors].sort((a, b) => {
+    const av = a[field];
+    const bv = b[field];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return bv - av;
+  });
+
+  const validVals = sorted.map(s => Math.abs(s[field] || 0)).filter(v => v > 0);
+  const maxAbs = validVals.length ? Math.max(...validVals, 0.01) : 0.01;
+
+  $('sectorContent').innerHTML = sorted.map((s, i) => {
+    const pch = s[field];
+    const display = pch != null ? pch : null;
+    const c = display == null ? '#4b5563' : display >= 0 ? '#10b981' : '#ef4444';
+    const barW = display != null ? Math.round(Math.abs(display) / maxAbs * 100) : 0;
+    const rankColor = i === 0 ? '#fbbf24' : i === 1 ? '#94a3b8' : i === 2 ? '#cd7c3a' : '#4b5563';
+    const valStr = display != null
+      ? `${sign(display)}${Math.abs(display).toFixed(2)}%`
+      : '<span style="color:#4b5563;font-size:0.6rem;">N/A</span>';
+    return `<div class="sec-chip" style="flex:1;min-width:90px;max-width:160px;">
+      <div class="flex items-center justify-between gap-1">
+        <span style="font-size:0.62rem;color:${rankColor};font-weight:700;">#${i+1}</span>
+        <span style="font-size:0.7rem;font-weight:700;color:#e2e8f0;flex:1;text-align:center;">${s.short}</span>
+      </div>
+      <div style="font-size:0.75rem;font-weight:700;color:${c};text-align:center;">${valStr}</div>
+      <div class="sec-bar" style="width:${barW}%;background:${c};margin-top:2px;"></div>
+    </div>`;
+  }).join('');
+}
+
+async function fetchSectorMulti() {
+  try {
+    const r = await fetch('/api/sector-rotation-multi');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    _sectorMultiData = d.sectors || [];
+    renderSectorChips(_sectorMultiData, SECTOR_TAB_FIELD[_activeSectorTab]);
+  } catch(e) {
+    $('sectorContent').innerHTML = `<p class="text-gray-600 text-xs text-center py-3 w-full">Sector data unavailable</p>`;
+  }
+}
+
+// ── GLOBAL MARKETS PANEL ─────────────────────────────────────────────────
+let globalLoaded = false;
+let globalOpen   = false;
+
+function toggleGlobal() {
+  globalOpen = !globalOpen;
+  $('globalPanel').classList.toggle('open', globalOpen);
+  $('globalOverlay').classList.toggle('hidden', !globalOpen);
+  if (globalOpen && !globalLoaded) loadGlobal();
+}
+
+async function loadGlobal() {
+  $('globalContent').innerHTML = '<p class="text-gray-500 text-xs text-center py-8">Loading global markets…</p>';
+  try {
+    const r = await fetch('/api/global-markets');
+    const data = await r.json();
+    renderGlobal(data);
+    globalLoaded = true;
+    $('globalTs').textContent = new Date().toLocaleTimeString('en-IN');
+  } catch(e) {
+    $('globalContent').innerHTML = `<p class="text-red-400 text-xs text-center py-8">Failed: ${e.message}</p>`;
+  }
+}
+
+const REGION_ORDER = ['US','US Futures','Europe','Asia','Commodities','Forex','Crypto'];
+const REGION_ICON  = {'US':'🇺🇸','US Futures':'📈','Europe':'🇪🇺','Asia':'🌏','Commodities':'🛢️','Forex':'💱','Crypto':'₿'};
+
+function renderGlobal(data) {
+  if (!data || Object.keys(data).length === 0) {
+    $('globalContent').innerHTML = '<p class="text-gray-500 text-xs text-center py-8">No data available</p>';
+    return;
+  }
+  const groups = {};
+  for (const [sym, item] of Object.entries(data)) {
+    const r = item.region || 'Other';
+    (groups[r] = groups[r] || []).push({sym, ...item});
+  }
+  let html = '';
+  for (const region of REGION_ORDER) {
+    const items = groups[region];
+    if (!items) continue;
+    html += `<div class="mb-4">
+      <div class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2 px-2">
+        ${REGION_ICON[region] || ''} ${region}
+      </div>`;
+    html += items.map(item => {
+      const pch = item.pchange;
+      const c   = pch == null ? '#6b7280' : pch >= 0 ? '#10b981' : '#ef4444';
+      return `<div class="gm-row">
+        <span class="gm-name">${item.name}</span>
+        <span class="gm-price">${item.price != null ? item.price.toLocaleString('en-US',{maximumFractionDigits:2}) : 'N/A'}</span>
+        <span class="gm-pct" style="color:${c};">${pch != null ? (pch>=0?'+':'')+pch.toFixed(2)+'%' : '—'}</span>
+      </div>`;
+    }).join('');
+    html += '</div>';
+  }
+  $('globalContent').innerHTML = html;
+}
+
+// ── MAIN RENDER ───────────────────────────────────────────────────────────
+let firstLoad = true;
+let _monthlyExp = '';
+
+function renderOverview(d) {
+  if (d.indices) renderIndexBar(d.indices);
+  renderMktBadge(d.market_is_open);
+
+  $('gainersContent').innerHTML = (d.gainers||[]).map(s=>moverRow(s,true)).join('')
+    || '<p class="text-gray-600 text-xs py-3 text-center">No data</p>';
+  $('losersContent').innerHTML  = (d.losers||[]).map(s=>moverRow(s,false)).join('')
+    || '<p class="text-gray-600 text-xs py-3 text-center">No data</p>';
+
+  renderBuildup(d.buildup);
+
+  const noi = d.nifty_oi || {};
+  if (firstLoad || !_monthlyExp) {
+    _monthlyExp = noi.monthly_expiry || '';
+    populateExpirySelects(noi.all_expiry_dates || [], noi.weekly_expiry || '', _monthlyExp);
+  }
+  renderOiBox(noi.monthly_strikes, 'monthlyOiContent', noi.monthly_expiry, 'monthlyExpLabel', noi.underlying, $('monthlyUnder'), noi.is_stale);
+  renderOiOpinion(noi.oi_opinion);
+
+  // Source badges
+  const staleTag  = $('oiStaleTag');
+  const sourceTag = $('oiSourceTag');
+  if (noi.is_stale && noi.stale_label) {
+    staleTag.textContent = noi.stale_label;
+    staleTag.classList.remove('hidden');
+    sourceTag.classList.add('hidden');
+  } else if (noi.source === 'Angel One') {
+    sourceTag.classList.remove('hidden');
+    staleTag.classList.add('hidden');
+  } else {
+    staleTag.classList.add('hidden');
+    sourceTag.classList.add('hidden');
+  }
+
+  // Merge live 1D sector data into _sectorMultiData so the 1D tab stays current
+  if (d.sectors && d.sectors.length) {
+    const dailyMap = {};
+    d.sectors.forEach(s => { dailyMap[s.short] = s.pchange; });
+    if (_sectorMultiData.length) {
+      _sectorMultiData.forEach(s => { if (dailyMap[s.short] != null) s.pchange_1d = dailyMap[s.short]; });
+    } else {
+      _sectorMultiData = d.sectors.map(s => ({...s, pchange_1d: s.pchange}));
+    }
+    if (_activeSectorTab === '1d') renderSectorChips(_sectorMultiData, 'pchange_1d');
+  }
+
+  $('lastUpdate').textContent = `Updated ${new Date(d.timestamp).toLocaleTimeString('en-IN')}`;
+  if (globalOpen) loadGlobal(); else globalLoaded = false;
+  if (firstLoad) firstLoad = false;
+}
+
+function goAnalyze(sym) {
+  window.location.href = `/analyze?symbol=${sym}`;
+}
+
+// ── SSE LIVE STREAM ───────────────────────────────────────────────────────
+let _sse = null;
+ 
+function connectSSE() {
+  if (_sse) { try { _sse.close(); } catch(_) {} }
+  $('refreshStatus').textContent = 'Connecting…';
+
+  _sse = new EventSource('/api/live-stream');
+
+  _sse.onopen = () => {
+    $('liveDot').style.color = '#10b981';
+    $('refreshStatus').textContent = '● LIVE';
+  };
+
+  _sse.onmessage = (e) => {
+    try {
+      renderOverview(JSON.parse(e.data));
+      $('liveDot').style.color = '#10b981';
+      $('refreshStatus').textContent = '● LIVE';
+    } catch(err) { console.error('SSE parse error', err); }
+  };
+
+  _sse.onerror = () => {
+    $('liveDot').style.color = '#ef4444';
+    $('refreshStatus').textContent = '◉ Reconnecting…';
+    try { _sse.close(); } catch(_) {}
+    _sse = null;
+    setTimeout(connectSSE, 4000);
+  };
+}
+
+// ── TSR PRO ───────────────────────────────────────────────────────────────
+
+function tsrFutRow(r) {
+  const name = r['Name'] || r['Code'] || r['Symbol'] || Object.values(r)[0] || '—';
+  const spot  = r['Spot Price'] || r['Price'] || '';
+  const chg   = r['Fut Price Change %'] || r['% Change'] || '';
+  const oiChg = r['% Change in OI'] || r['OI Change %'] || '';
+  const c     = parseFloat(chg) >= 0 ? '#10b981' : '#ef4444';
+  return `<div class="bu-row" style="cursor:pointer;" onclick="goAnalyze('${name.split(' ')[0]}')">
+    <span class="bu-sym">${name}</span>
+    <div class="bu-vals">
+      ${spot ? `<span class="bu-price">₹${spot}</span>` : ''}
+      ${chg  ? `<span class="bu-pct" style="color:${c};">${parseFloat(chg)>=0?'+':''}${parseFloat(chg).toFixed(2)}%</span>` : ''}
+      ${oiChg? `<span class="bu-oi" style="color:#818cf8;">OI ${parseFloat(oiChg)>=0?'+':''}${parseFloat(oiChg).toFixed(1)}%</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function tsrPcrRow(r) {
+  const name = r['Name'] || Object.values(r)[0] || '—';
+  const spot  = r['Spot Price'] || '';
+  const pcr   = r['PCR OI'] || r['PCR'] || '';
+  const c     = parseFloat(pcr) > 1.2 ? '#10b981' : '#f59e0b';
+  return `<div class="bu-row">
+    <span class="bu-sym" style="font-size:0.65rem;">${name}</span>
+    <div class="bu-vals">
+      ${spot ? `<span class="bu-price">₹${spot}</span>` : ''}
+      ${pcr  ? `<span class="bu-pct" style="color:${c};">PCR ${parseFloat(pcr).toFixed(2)}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function tsrSignalRow(r) {
+  const code  = r['Code'] || r['Symbol'] || r['Name'] || '—';
+  const price = r['Price'] || r['Close Price Latest'] || '';
+  return `<div class="bu-row" style="cursor:pointer;" onclick="goAnalyze('${code}')">
+    <span class="bu-sym">${code}</span>
+    ${price ? `<span class="bu-price">₹${price}</span>` : ''}
+  </div>`;
+}
+
+async function loadTsrData() {
+  try {
+    const r = await fetch('/api/tsr-data');
+    const d = await r.json();
+    const bu = d.buildup || {};
+    const showRow = $('tsrRow');
+
+    const hasData = (bu.long_buildup?.length || bu.short_buildup?.length ||
+                     bu.short_covering?.length || d.pcr?.length || d.signals?.length);
+    if (!hasData) return;
+
+    showRow.style.removeProperty('display');
+
+    const lb = bu.long_buildup || [];
+    $('tsrLongBuildup').innerHTML = lb.length
+      ? lb.slice(0,8).map(tsrFutRow).join('')
+      : '<p class="text-gray-600 text-xs text-center py-3">No data</p>';
+
+    const sb = bu.short_buildup || [];
+    $('tsrShortBuildup').innerHTML = sb.length
+      ? sb.slice(0,8).map(tsrFutRow).join('')
+      : '<p class="text-gray-600 text-xs text-center py-3">No data</p>';
+
+    const sc = bu.short_covering || [];
+    $('tsrShortCovering').innerHTML = sc.length
+      ? sc.slice(0,8).map(tsrFutRow).join('')
+      : '<p class="text-gray-600 text-xs text-center py-3">No data</p>';
+
+    const pcr = d.pcr || [];
+    $('tsrPcr').innerHTML = pcr.length
+      ? pcr.slice(0,8).map(tsrPcrRow).join('')
+      : '<p class="text-gray-600 text-xs text-center py-3">No data</p>';
+
+    const sig = d.signals || [];
+    $('tsrSignals').innerHTML = sig.length
+      ? sig.slice(0,10).map(tsrSignalRow).join('')
+      : '<p class="text-gray-600 text-xs text-center py-3">No signals</p>';
+
+  } catch(e) {
+    console.warn('TSR fetch failed:', e.message);
+  }
+}
+
+// ── SECTOR ROTATION ANALYSIS (5-factor, multi-timeframe) ─────────────────
+
+const RRG_COLOR = {
+  Leading:   '#10b981', Improving: '#60a5fa',
+  Weakening: '#f59e0b', Lagging:   '#ef4444',
+};
+const RATING_COLOR = {
+  'Strong Buy': '#10b981', 'Buy': '#60a5fa',
+  'Watch': '#f59e0b',      'Avoid': '#ef4444',
+};
+const ACTION_ICON = {
+  BUY: '🟢', ACCUMULATE: '🔵', WAIT: '🟡', AVOID: '🔴',
+};
+
+let _saData      = null;
+let _saLoaded    = false;
+let _saActiveTf  = 'daily';
+
+function switchSaTab(tf) {
+  _saActiveTf = tf;
+  ['daily','weekly','monthly'].forEach(t => {
+    const id  = 'saTab' + t.charAt(0).toUpperCase() + t.slice(1);
+    const btn = $(id);
+    if (btn) btn.classList.toggle('active', t === tf);
+  });
+  if (_saData) _renderSaCurrentTf();
+}
+
+function _renderSaRec(rec) {
+  const action    = rec.action || 'WAIT';
+  const actIcon   = ACTION_ICON[action] || '🟡';
+  const actColor  = RRG_COLOR[
+    action === 'BUY' ? 'Leading' :
+    action === 'ACCUMULATE' ? 'Improving' :
+    action === 'WAIT' ? 'Weakening' : 'Lagging'
+  ] || '#f59e0b';
+  const topSector = rec.top_sector || '—';
+  const reasons   = rec.reasons || [];
+  const avoid     = rec.avoid   || [];
+  const tfLabel   = rec.tf      || '';
+
+  $('saRecommendation').innerHTML = `
+    <div class="rec-box rec-${action} flex flex-col sm:flex-row gap-3">
+      <div class="flex-1">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="text-base font-black" style="color:${actColor};">${actIcon} ${action}</span>
+          <span class="font-bold text-sm text-gray-200">${topSector}</span>
+          ${rec.rating ? `<span class="text-xs font-bold" style="color:${RATING_COLOR[rec.rating]||'#94a3b8'};">${rec.rating}</span>` : ''}
+          ${tfLabel ? `<span class="text-xs px-2 py-0.5 rounded" style="background:rgba(167,139,250,0.12);color:#a78bfa;">${tfLabel}</span>` : ''}
+        </div>
+        ${rec.sectors && rec.sectors.length ? `
+          <div class="flex flex-wrap gap-1 mb-2">
+            ${rec.sectors.map(s => `<span class="text-xs font-bold px-2 py-0.5 rounded" style="background:rgba(16,185,129,0.12);color:#10b981;">${s}</span>`).join('')}
+          </div>` : ''}
+        <ul class="text-xs text-gray-400 space-y-0.5">
+          ${reasons.map(r => `<li>• ${r}</li>`).join('')}
+        </ul>
+      </div>
+      ${avoid.length ? `
+      <div class="sm:border-l sm:pl-3 border-gray-800">
+        <div class="text-xs text-gray-600 mb-1 font-semibold uppercase tracking-wide">Avoid</div>
+        <div class="flex flex-wrap gap-1">
+          ${avoid.map(s => `<span class="text-xs font-bold px-2 py-0.5 rounded" style="background:rgba(239,68,68,0.12);color:#ef4444;">${s}</span>`).join('')}
+        </div>
+      </div>` : ''}
+    </div>`;
+}
+
+function _renderSaTable(sectors) {
+  if (!sectors.length) {
+    $('saSectorList').innerHTML = '<p class="text-gray-600 text-xs text-center py-3">Data unavailable — click ↻ Refresh</p>';
+    $('saTableHeader').style.display = 'none';
+    return;
+  }
+  $('saTableHeader').style.display = 'grid';
+  const isDaily   = _saActiveTf === 'daily';
+  const isFallback = sectors[0] && sectors[0].is_fallback;
+
+  const fallbackBanner = isFallback
+    ? `<div style="font-size:0.62rem;color:#f59e0b;padding:4px 6px;margin-bottom:4px;background:rgba(245,158,11,0.08);border-radius:5px;border:1px solid rgba(245,158,11,0.2);">
+        ⚠ Yahoo Finance unavailable for ${_saActiveTf} interval — showing Daily data as reference
+       </div>`
+    : '';
+
+  $('saSectorList').innerHTML = fallbackBanner + sectors.map((s, idx) => {
+    const pchClr = s.pchange_1d >= 0 ? '#10b981' : '#ef4444';
+    const adxClr = s.adx >= 25 ? '#10b981' : s.adx >= 20 ? '#f59e0b' : '#6b7280';
+    const volClr = s.vol_ratio >= 1.5 ? '#10b981' : s.vol_ratio >= 1.2 ? '#f59e0b' : '#6b7280';
+    const brClr  = s.breadth_pct >= 60 ? '#10b981' : s.breadth_pct >= 50 ? '#f59e0b' : '#ef4444';
+    const scClr  = s.score >= 12 ? '#10b981' : s.score >= 8 ? '#60a5fa' : s.score >= 5 ? '#f59e0b' : '#ef4444';
+    const ratClr = RATING_COLOR[s.rating] || '#94a3b8';
+
+    // Cross-TF confirmation badges shown on daily top-3 only
+    let crossTf = '';
+    if (isDaily && idx < 3 && s.weekly_rrg && s.weekly_rrg !== '—') {
+      const wClr = RRG_COLOR[s.weekly_rrg]  || '#6b7280';
+      const mClr = RRG_COLOR[s.monthly_rrg] || '#6b7280';
+      crossTf = `<div style="font-size:0.57rem;margin-top:1px;display:flex;gap:5px;">
+        <span style="color:${wClr};">W:${(s.weekly_rrg||'').slice(0,3)}</span>
+        <span style="color:${mClr};">M:${(s.monthly_rrg||'').slice(0,3)}</span>
+      </div>`;
+    }
+
+    return `<div class="sa-row" style="grid-template-columns:72px 55px 48px 76px 50px 46px 58px 36px 80px;gap:4px;">
+      <div>
+        <span style="font-weight:700;color:#e2e8f0;font-size:0.72rem;">${s.short}</span>
+        ${crossTf}
+      </div>
+      <span style="text-align:right;color:#94a3b8;">${fmt(s.price, 0)}</span>
+      <span style="text-align:right;font-weight:600;color:${pchClr};">${s.pchange_1d >= 0 ? '+' : ''}${fmt(s.pchange_1d, 2)}%</span>
+      <span class="rrg-badge rrg-${s.rrg_quadrant}" style="text-align:center;display:block;">${s.rrg_quadrant}</span>
+      <span style="text-align:right;font-weight:600;color:${adxClr};">${s.adx}</span>
+      <span style="text-align:right;font-weight:600;color:${volClr};">${s.vol_ratio}×</span>
+      <span style="text-align:right;color:${brClr};">${s.breadth_pct}%</span>
+      <span class="score-pill" style="background:rgba(0,0,0,0.3);color:${scClr};">${s.score}</span>
+      <span style="font-size:0.6rem;font-weight:700;text-align:center;color:${ratClr};">${s.rating}</span>
+    </div>`;
+  }).join('');
+}
+
+function _renderSaCurrentTf() {
+  const sectors = (_saData[_saActiveTf] || []);
+  const rec     = _saData[_saActiveTf + '_recommendation'] || _saData.recommendation || {};
+  _renderSaRec(rec);
+  _renderSaTable(sectors);
+}
+
+function renderSectorAnalysis(data) {
+  _saData = data;
+  _renderSaCurrentTf();
+}
+
+async function loadSectorAnalysis(force = false) {
+  if (_saLoaded && !force) return;
+  if (force) {
+    $('saRecommendation').innerHTML = '<p class="text-gray-500 text-xs text-center py-3">Refreshing analysis…</p>';
+    $('saSectorList').innerHTML = '';
+    $('saTableHeader').style.display = 'none';
+  }
+  try {
+    const url = force ? '/api/sector-analysis?force=true' : '/api/sector-analysis';
+    const r   = await fetch(url);
+    const d   = await r.json();
+    renderSectorAnalysis(d);
+    _saLoaded = true;
+  } catch(e) {
+    $('saRecommendation').innerHTML = `<p class="text-red-400 text-xs text-center py-3">Analysis failed: ${e.message}</p>`;
+  }
+}
+
+// ── LIVE PIVOT SIGNALS ────────────────────────────────────────────────────
+let _pivotLoaded = false;
+
+function _pivotRow(h, isBull) {
+  const c      = isBull ? '#10b981' : '#ef4444';
+  const breach = isBull ? h.r1 : h.s1;
+  const next   = isBull ? h.r2 : h.s2;
+  const sign2  = isBull ? '+' : '-';
+  return `<div class="bu-row" style="display:grid;grid-template-columns:78px 64px 54px 54px 54px 44px;gap:3px;align-items:center;cursor:pointer;" onclick="goAnalyze('${h.symbol}')">
+    <span style="font-weight:700;color:#e2e8f0;font-size:0.72rem;">${h.symbol}</span>
+    <span style="text-align:right;font-size:0.68rem;color:#e2e8f0;">₹${fmt(h.ltp)}</span>
+    <span style="text-align:right;font-size:0.63rem;color:${c};font-weight:600;">₹${fmt(breach)}</span>
+    <span style="text-align:right;font-size:0.63rem;color:#f59e0b;font-weight:700;">₹${fmt(next)}</span>
+    <span style="text-align:right;font-size:0.62rem;color:#6b7280;">₹${fmt(h.pp)}</span>
+    <span style="text-align:right;font-size:0.63rem;font-weight:700;color:${c};">${sign2}${h.breakout_pct.toFixed(2)}%</span>
+  </div>`;
+}
+
+async function loadPivotSignals(force = false) {
+  if (_pivotLoaded && !force) return;
+  $('pivotBullish').innerHTML = '<p class="text-gray-500 text-xs text-center py-3">Scanning Nifty 200…</p>';
+  $('pivotBearish').innerHTML = '';
+  try {
+    const url = force ? '/api/pivot-signals?force=true' : '/api/pivot-signals';
+    const r   = await fetch(url);
+    const d   = await r.json();
+    const bull = d.bullish || [];
+    const bear = d.bearish || [];
+    const tot  = d.total_scanned || 0;
+
+    $('pivotScanCount').textContent = tot ? `${tot} stocks scanned` : '';
+    if (d.timestamp) {
+      const ts = new Date(d.timestamp).toLocaleTimeString('en-IN');
+      $('pivotMeta').textContent = `Updated ${ts} · Pivots from previous session OHLC`;
+    }
+
+    $('pivotBullish').innerHTML = bull.length
+      ? bull.slice(0, 15).map(h => _pivotRow(h, true)).join('')
+      : '<p class="text-gray-600 text-xs text-center py-4">No R1 breakouts detected</p>';
+
+    $('pivotBearish').innerHTML = bear.length
+      ? bear.slice(0, 15).map(h => _pivotRow(h, false)).join('')
+      : '<p class="text-gray-600 text-xs text-center py-4">No S1 breakdowns detected</p>';
+
+    if (d.error && !bull.length && !bear.length) {
+      $('pivotBullish').innerHTML = `<p class="text-red-400 text-xs text-center py-3">${d.error}</p>`;
+    }
+    _pivotLoaded = true;
+  } catch(e) {
+    $('pivotBullish').innerHTML = `<p class="text-red-400 text-xs text-center py-3">Scan failed: ${e.message}</p>`;
+  }
+}
+
+// ── AI STOCK RECOMMENDATIONS ──────────────────────────────────────────────
+
+const REC_ACT = {
+  BUY:   { bg:'rgba(16,185,129,0.1)',  br:'rgba(16,185,129,0.35)', c:'#10b981', icon:'🟢' },
+  WATCH: { bg:'rgba(245,158,11,0.1)',  br:'rgba(245,158,11,0.35)', c:'#f59e0b', icon:'🟡' },
+  AVOID: { bg:'rgba(239,68,68,0.1)',   br:'rgba(239,68,68,0.35)',  c:'#ef4444', icon:'🔴' },
+};
+const REC_CONV = { HIGH:'#10b981', MEDIUM:'#f59e0b', LOW:'#6b7280' };
+const FACTOR_ICON = {
+  crude_up:'🛢️↑', crude_down:'🛢️↓', gold_up:'🥇↑', gold_down:'🥇↓',
+  long_buildup:'📈', short_covering:'♻️', fno:'📊',
+  sector_leading:'🏆', sector_lagging:'⬇️', geopolitical:'🌍',
+  defense:'🛡️', rate_policy:'🏦', commodity:'⚡', technical:'📉',
+};
+const GEO_LABEL = {
+  defense:'🛡️ Defense', energy_crisis:'⛽ Energy', rupee_pressure:'💱 Rupee',
+  rate_policy:'🏦 Rate Policy', infra_policy:'🏗️ Infra',
+};
+
+let _recLoaded = false;
+
+function _recCard(rec) {
+  const action = rec.action || 'WATCH';
+  const st   = REC_ACT[action] || REC_ACT.WATCH;
+  const conv = rec.conviction || 'MEDIUM';
+  const cClr = REC_CONV[conv] || '#6b7280';
+  const fTags = (rec.factors || []).map(f =>
+    `<span style="font-size:0.58rem;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,0.05);color:#9ca3af;">${FACTOR_ICON[f] || f}</span>`
+  ).join('');
+  return `
+<div style="background:${st.bg};border:1px solid ${st.br};border-radius:8px;padding:12px 14px;">
+  <div class="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+    <div class="flex items-center gap-2">
+      <span style="font-size:0.88rem;font-weight:800;color:${st.c};">${st.icon} ${rec.symbol || '—'}</span>
+      <span style="font-size:0.58rem;font-weight:700;padding:1px 6px;border-radius:4px;background:${st.bg};color:${st.c};border:1px solid ${st.br};">${action}</span>
+    </div>
+    <span style="font-size:0.6rem;font-weight:700;color:${cClr};">${conv}</span>
+  </div>
+  ${rec.holding ? `<div style="font-size:0.58rem;color:#6b7280;margin-bottom:6px;">⏱ ${rec.holding}</div>` : ''}
+  <div class="grid grid-cols-3 gap-1 mb-2" style="font-size:0.62rem;">
+    <div style="background:rgba(255,255,255,0.04);border-radius:4px;padding:4px 6px;">
+      <div style="color:#6b7280;margin-bottom:1px;">Entry</div>
+      <div style="color:#e2e8f0;font-weight:700;">₹${rec.entry_zone || '—'}</div>
+    </div>
+    <div style="background:rgba(16,185,129,0.07);border-radius:4px;padding:4px 6px;">
+      <div style="color:#6b7280;margin-bottom:1px;">Target</div>
+      <div style="color:#10b981;font-weight:700;">₹${rec.target || '—'}</div>
+    </div>
+    <div style="background:rgba(239,68,68,0.07);border-radius:4px;padding:4px 6px;">
+      <div style="color:#6b7280;margin-bottom:1px;">SL</div>
+      <div style="color:#ef4444;font-weight:700;">₹${rec.stop_loss || '—'}</div>
+    </div>
+  </div>
+  ${rec.rationale ? `<div style="font-size:0.64rem;color:#9ca3af;line-height:1.55;margin-bottom:5px;">${rec.rationale}</div>` : ''}
+  ${rec.nifty_beta_note ? `<div style="font-size:0.58rem;color:#818cf8;margin-bottom:4px;">β ${rec.nifty_beta_note}</div>` : ''}
+  <div class="flex flex-wrap gap-1">${fTags}</div>
+  ${rec.risk ? `<div style="font-size:0.57rem;color:#6b7280;margin-top:6px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.05);">⚠ ${rec.risk}</div>` : ''}
+</div>`;
+}
+
+function _renderRecMacroStrip(data) {
+  const pills = [];
+  for (const c of (data.commodity_signals || [])) {
+    if (c.direction === 'FLAT') continue;
+    const arrow = c.direction === 'UP' ? '↑' : '↓';
+    const color = c.direction === 'UP' ? '#10b981' : '#ef4444';
+    const mag   = c.magnitude === 'HIGH' ? '🔥' : c.magnitude === 'MEDIUM' ? '⚡' : '';
+    pills.push(`<span style="font-size:0.62rem;font-weight:700;padding:2px 9px;border-radius:10px;background:rgba(255,255,255,0.05);color:${color};border:1px solid rgba(255,255,255,0.08);">${mag}${c.name} ${arrow}${c.pchange>=0?'+':''}${c.pchange}%</span>`);
+  }
+  for (const theme of (data.geo_themes_active || [])) {
+    pills.push(`<span style="font-size:0.62rem;font-weight:700;padding:2px 9px;border-radius:10px;background:rgba(99,102,241,0.1);color:#818cf8;border:1px solid rgba(99,102,241,0.25);">${GEO_LABEL[theme] || theme}</span>`);
+  }
+  $('recMacroStrip').innerHTML = pills.join('');
+}
+
+function _renderPreAnalysis(pa) {
+  if (!pa || !Object.keys(pa).length) return;
+  const items = [
+    { lbl:'🛢️ Commodity', txt: pa.commodity_impact },
+    { lbl:'🌍 Geo/News',  txt: pa.geo_news_impact  },
+    { lbl:'📊 Nifty',     txt: pa.nifty_trend      },
+    { lbl:'📈 F&O',       txt: pa.fno_bias         },
+    { lbl:'🏆 Sector',    txt: pa.sector_bias      },
+  ].filter(i => i.txt);
+  if (!items.length) return;
+  $('recPreAnalysis').innerHTML = items.map(i =>
+    `<div style="background:#0d0d1a;border:1px solid #1e1e30;border-radius:6px;padding:8px 10px;">
+      <div style="font-size:0.6rem;font-weight:700;color:#818cf8;margin-bottom:3px;">${i.lbl}</div>
+      <div style="font-size:0.62rem;color:#9ca3af;line-height:1.5;">${i.txt}</div>
+    </div>`
+  ).join('');
+  $('recPreAnalysis').classList.remove('hidden');
+}
+
+function renderRecommendations(data) {
+  if (data.timestamp) {
+    const ts = new Date(data.timestamp).toLocaleTimeString('en-IN');
+    $('recTs').textContent = `Updated ${ts}`;
+  }
+  if (data.market_thesis) {
+    $('recThesis').innerHTML = `<div style="line-height:1.7;">${data.market_thesis}</div>`;
+  } else if (data.error) {
+    $('recThesis').innerHTML = `<p class="text-red-400 text-xs">Error: ${data.error}</p>`;
+  }
+
+  // Data quality badge
+  const priceCnt = data.price_data_stocks || 0;
+  const tsrCnt   = data.tsr_long_count    || 0;
+  const badge = $('recDataBadge');
+  if (priceCnt > 0) {
+    badge.textContent = `✓ ${priceCnt} live prices · TSR ${tsrCnt} signals`;
+    badge.classList.remove('hidden');
+  }
+
+  _renderRecMacroStrip(data);
+  _renderPreAnalysis(data.pre_analysis_summary);
+
+  const recs = data.recommendations || [];
+  $('recCount').textContent = recs.length ? `${recs.length} picks` : '';
+  $('recGrid').innerHTML = recs.length
+    ? recs.map(_recCard).join('')
+    : '<p class="text-gray-600 text-xs text-center py-4 col-span-full">No recommendations generated</p>';
+
+  const avoid = data.stocks_to_avoid || [];
+  if (avoid.length) {
+    $('recAvoidSection').classList.remove('hidden');
+    $('recAvoidList').innerHTML = avoid.map(a =>
+      `<div style="display:flex;align-items:baseline;gap:8px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.18);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:0.62rem;" onclick="goAnalyze('${a.symbol}')">
+        <span style="font-weight:700;color:#ef4444;white-space:nowrap;">${a.symbol}</span>
+        <span style="color:#6b7280;">${a.reason}</span>
+      </div>`
+    ).join('');
+  }
+
+  const wl = data.watchlist || [];
+  if (wl.length) {
+    $('recWatchlist').innerHTML = `<div class="flex flex-wrap items-center gap-2 mt-1">
+      <span style="font-size:0.62rem;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;">👁 Watchlist:</span>
+      ${wl.map(s => `<span style="font-size:0.65rem;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(255,255,255,0.05);color:#94a3b8;cursor:pointer;" onclick="goAnalyze('${s}')">${s}</span>`).join('')}
+    </div>`;
+  }
+}
+
+async function loadRecommendations(force = false) {
+  if (_recLoaded && !force) return;
+  if (force) {
+    $('recThesis').innerHTML = '<p class="text-gray-500 text-xs text-center py-2">Running 6-factor analysis… (30–60s)</p>';
+    $('recGrid').innerHTML = '';
+    $('recCount').textContent = '';
+  }
+  try {
+    const url = force ? '/api/recommendations?force=true' : '/api/recommendations';
+    const r   = await fetch(url);
+    const d   = await r.json();
+    renderRecommendations(d);
+    _recLoaded = true;
+  } catch(e) {
+    $('recThesis').innerHTML = `<p class="text-red-400 text-xs text-center py-2">Failed: ${e.message}</p>`;
+  }
+}
+
+async function sendRecPdf() {
+  const btn = $('recPdfBtn');
+  const orig = btn.textContent;
+  btn.textContent = '⏳ Sending…';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/send-recommendations-pdf', { method: 'POST' });
+    const d = await r.json();
+    if (d.status === 'sending') {
+      btn.textContent = '✅ Sent!';
+      btn.style.color = '#10b981';
+    } else {
+      btn.textContent = '❌ Error';
+      btn.style.color = '#ef4444';
+    }
+  } catch(e) {
+    btn.textContent = '❌ Error';
+    btn.style.color = '#ef4444';
+  }
+  setTimeout(() => {
+    btn.textContent = orig;
+    btn.style.color = '#818cf8';
+    btn.disabled = false;
+  }, 4000);
+}
+
+// ── STARTUP ───────────────────────────────────────────────────────────────
+connectSSE();
+fetchSectorMulti();
+loadTsrData();
+loadSectorAnalysis();
+loadPivotSignals();
+setInterval(loadTsrData, 300000);
+setInterval(() => loadSectorAnalysis(true), 300000);
+setInterval(() => loadPivotSignals(true), 120000);   // refresh pivot scan every 2 min
+setInterval(() => loadRecommendations(true), 1800000); // refresh recommendations every 30 min
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && globalOpen) toggleGlobal();
+});
+</script>
+</body>
+</html>
