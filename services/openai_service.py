@@ -6,12 +6,15 @@ from config import OPENAI_API_KEY
 logger = logging.getLogger(__name__)
 
 _client: OpenAI | None = None
+_client_key: str = ""
 
 
 def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(api_key=OPENAI_API_KEY)
+    global _client, _client_key
+    from config import OPENAI_API_KEY as _key
+    if _client is None or _client_key != _key:
+        _client = OpenAI(api_key=_key)
+        _client_key = _key
     return _client
 
 
