@@ -225,6 +225,7 @@ def _build_pm_pdf(
     pullbacks:    list[dict],
     runners:      list[dict],
     ai_text:      str,
+    vwma_hits:    list[dict] | None = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -481,7 +482,55 @@ def _build_pm_pdf(
         ))
         story.append(Spacer(1, 6*mm))
 
-    # ── 5. AI Analysis & Top Picks ────────────────────────────────────────────
+    # ── 5. VWMA(20) Combo Setup ───────────────────────────────────────────────
+    if vwma_hits:
+        TEAL2 = colors.HexColor("#0891b2")
+        _section_header(
+            f"VWMA(20) Combo Setup  ({len(vwma_hits)} stocks)",
+            "Day N-1: Doji/Hammer/Pin Bar at VWMA(20)  +  Day N: Bullish confirmation  --  TSR universe",
+            TEAL2,
+        )
+        v_hdr = ["#", "Symbol", "LTP", "VWMA(20)", "Dist%", "Reversal Candle", "Confirm Candle", "Chg%"]
+        v_rows = [v_hdr]
+        cw_v = [7*mm, 26*mm, 20*mm, 20*mm, 13*mm, 36*mm, 36*mm, 14*mm]
+        for i, h in enumerate(vwma_hits[:20], 1):
+            pat = " | ".join(h.get("reversal_pattern", []))
+            rev = f"{pat}  C:{h.get('rev_c', '')}"
+            con = f"Bullish  C:{h.get('con_c', '')}"
+            v_rows.append([
+                str(i), h["symbol"],
+                f"{h['ltp']:,.2f}", f"{h['vwma']:,.2f}",
+                f"{h['dist_pct']:.2f}%",
+                rev, con,
+                f"{h['pchange']:+.2f}%",
+            ])
+        t_v = Table(v_rows, colWidths=cw_v)
+        ts_v = TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), TEAL2),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, 0), 7),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("ALIGN",         (1, 1), (1, -1), "LEFT"),
+            ("ALIGN",         (5, 1), (6, -1), "LEFT"),
+            ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
+            ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
+            ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ])
+        for i, h in enumerate(vwma_hits[:20], 1):
+            ts_v.add("BACKGROUND", (0, i), (-1, i), ALT_ROW if i % 2 == 0 else colors.white)
+            ts_v.add("TEXTCOLOR",  (5, i), (5, i), colors.HexColor("#d97706"))
+            ts_v.add("TEXTCOLOR",  (6, i), (6, i), GREEN)
+            pch_clr = GREEN if h["pchange"] >= 0 else RED
+            ts_v.add("TEXTCOLOR",  (7, i), (7, i), pch_clr)
+            ts_v.add("FONTNAME",   (7, i), (7, i), "Helvetica-Bold")
+        t_v.setStyle(ts_v)
+        story.append(t_v)
+        story.append(Spacer(1, 6*mm))
+
+    # ── 6. AI Analysis & Top Picks ────────────────────────────────────────────
     if ai_text:
         _section_header(
             "🤖 AI Analysis & Trend Continuation Picks",
@@ -551,11 +600,14 @@ async def pm_scan_and_send() -> None:
     date_str = datetime.now().strftime("%d %b %Y")
 
     try:
+        from services.vwma_candle_service import scan_vwma_candle
+
         # Fast parallel fetches — TSR reads from in-memory cache (non-blocking)
-        stocks, buildup_raw, tsr_bu = await asyncio.gather(
+        stocks, buildup_raw, tsr_bu, vwma_hits = await asyncio.gather(
             get_nifty500_ohlc(),
             get_fno_oi_buildup(15),
             get_tsr_buildup(),
+            scan_vwma_candle(),
         )
 
         # ── Merge NSE FNO + TSR Pro long buildup with source tags ────────────
@@ -598,7 +650,8 @@ async def pm_scan_and_send() -> None:
 
         # Build PDF in thread
         pdf_bytes = await asyncio.to_thread(
-            _build_pm_pdf, date_str, long_buildup, breakouts, pullbacks, runners, ai_text
+            _build_pm_pdf, date_str, long_buildup, breakouts, pullbacks, runners, ai_text,
+            vwma_hits or [],
         )
 
         # Telegram caption

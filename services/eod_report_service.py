@@ -206,6 +206,7 @@ def _build_eod_pdf(
     delivery:     list[dict],
     sector_data:  dict,
     ai_text:      str,
+    vwma_hits:    list[dict] | None = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -492,7 +493,39 @@ def _build_eod_pdf(
         ))
         story.append(Spacer(1, 6*mm))
 
-    # ── 7. AI EOD Analysis ────────────────────────────────────────────────────
+    # ── 7. VWMA(20) Combo Setup ───────────────────────────────────────────────
+    if vwma_hits:
+        TEAL2 = colors.HexColor("#0891b2")
+        _section_header(
+            f"VWMA(20) Combo Setup  ({len(vwma_hits)} stocks)",
+            "Day N-1: Doji/Hammer/Pin Bar at VWMA(20)  +  Day N: Bullish confirmation  --  TSR universe",
+            TEAL2,
+        )
+        v_hdr = ["#", "Symbol", "LTP", "VWMA(20)", "Dist%", "Reversal Candle", "Confirm Candle", "Chg%"]
+        cw_v  = [7*mm, 26*mm, 20*mm, 20*mm, 13*mm, 36*mm, 36*mm, 14*mm]
+        v_rows = [v_hdr]
+        for i, h in enumerate(vwma_hits[:20], 1):
+            pat = " | ".join(h.get("reversal_pattern", []))
+            v_rows.append([
+                str(i), h["symbol"],
+                f"{h['ltp']:,.2f}", f"{h['vwma']:,.2f}",
+                f"{h['dist_pct']:.2f}%",
+                f"{pat}  C:{h.get('rev_c', '')}",
+                f"Bullish  C:{h.get('con_c', '')}",
+                f"{h['pchange']:+.2f}%",
+            ])
+        t_v, ts_v = _simple_table(v_rows, cw_v, TEAL2)
+        for i, h in enumerate(vwma_hits[:20], 1):
+            ts_v.add("TEXTCOLOR", (5, i), (5, i), AMBER)
+            ts_v.add("TEXTCOLOR", (6, i), (6, i), GREEN)
+            pch_clr = GREEN if h["pchange"] >= 0 else RED
+            ts_v.add("TEXTCOLOR", (7, i), (7, i), pch_clr)
+            ts_v.add("FONTNAME",  (7, i), (7, i), "Helvetica-Bold")
+        t_v.setStyle(ts_v)
+        story.append(t_v)
+        story.append(Spacer(1, 6*mm))
+
+    # ── 8. AI EOD Analysis ────────────────────────────────────────────────────
     if ai_text:
         _section_header(
             "AI End-of-Day Analysis & Tomorrow's Strategy",
@@ -540,16 +573,18 @@ async def eod_scan_and_send() -> None:
     from services.telegram_service import send_document
     from services.tomorrow_scanner_service import scan_tomorrow_runners
     from services.pm_report_service import _normalize_tsr_buildup
+    from services.vwma_candle_service import scan_vwma_candle
 
     logger.info("EOD Report: starting 4:00 PM scan")
     date_str = datetime.now().strftime("%d %b %Y")
 
     try:
-        stocks, buildup_raw, tsr_bu, runners = await asyncio.gather(
+        stocks, buildup_raw, tsr_bu, runners, vwma_hits = await asyncio.gather(
             get_nifty500_ohlc(),
             get_fno_oi_buildup(15),
             get_tsr_buildup(),
             scan_tomorrow_runners(),
+            scan_vwma_candle(),
         )
 
         stocks   = stocks or []
@@ -595,6 +630,7 @@ async def eod_scan_and_send() -> None:
             _build_eod_pdf,
             date_str, gainers, losers, long_buildup, runners,
             watchlist, delivery, sector_data, ai_text,
+            vwma_hits or [],
         )
 
         # Telegram caption
@@ -612,6 +648,7 @@ async def eod_scan_and_send() -> None:
             f"Tomorrow HIGH Runners: {' . '.join(hi_run) or 'None'}",
             f"Tomorrow Watchlist: {' . '.join(wl_top) or 'None'}",
             "",
+            f"VWMA(20) Combo Setups: {len(vwma_hits or [])} stocks  (Doji/Hammer/Pin Bar + Bullish)",
             "AI EOD analysis + Tomorrow strategy included in PDF",
         ]
 
