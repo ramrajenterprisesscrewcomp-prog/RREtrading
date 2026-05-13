@@ -150,24 +150,14 @@ async def scan_vwma_candle() -> list[dict]:
             if not matched:
                 return None
 
-            # VWMA touch: candle low or close within threshold
-            touch_dist = min(
-                abs(l - vwma) / vwma * 100,
-                abs(c - vwma) / vwma * 100,
-            )
-            if touch_dist > VWMA_TOUCH_PCT:
-                return None
-
-            prev_c  = data["closes"][-2] if len(data["closes"]) >= 2 else c
-            pchange = round((c - prev_c) / prev_c * 100, 2) if prev_c else 0.0
-            hl      = h - l
+            prev_c   = data["closes"][-2] if len(data["closes"]) >= 2 else c
+            pchange  = round((c - prev_c) / prev_c * 100, 2) if prev_c else 0.0
+            hl       = h - l
             body_pct = round((c - o) / hl * 100, 1) if hl else 0.0
 
             return {
                 "symbol":   sym,
                 "ltp":      round(c, 2),
-                "vwma":     round(vwma, 2),
-                "dist_pct": round(touch_dist, 2),
                 "patterns": matched,
                 "pchange":  pchange,
                 "body_pct": body_pct,
@@ -181,7 +171,7 @@ async def scan_vwma_candle() -> list[dict]:
     ) as client:
         raw = await asyncio.gather(*[_check(s, client) for s in symbols])
 
-    hits = sorted([r for r in raw if r], key=lambda x: x["dist_pct"])
+    hits = sorted([r for r in raw if r], key=lambda x: -x["pchange"])
     logger.info("VWMA candle scan: %d hits / %d symbols", len(hits), len(symbols))
     return hits
 
@@ -225,7 +215,7 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
 
     story.append(Paragraph("RRE Market Scanner", sty("T", size=15, align=TA_CENTER, bold=True, after=3)))
     story.append(Paragraph(
-        "Pin Bar / Hammer / Doji  +  Bullish  +  VWMA(20) Touch  --  Daily",
+        "Reversal Pattern + Bullish Candle  --  Daily  --  Nifty 200",
         sty("S", size=8, color=GRAY, align=TA_CENTER, after=2),
     ))
     story.append(Paragraph(date_str, sty("D", size=8, color=GRAY, align=TA_CENTER, after=4)))
@@ -233,33 +223,26 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
     story.append(Spacer(1, 4*mm))
 
     story.append(Paragraph(
-        f"Stocks found: {len(hits)}   --   "
-        f"Pattern + Bullish (close > open) + within {VWMA_TOUCH_PCT}% of VWMA(20)",
+        f"Stocks found: {len(hits)}   --   Pin Bar / Hammer / Doji  AND  close > open  --  Sorted by % change",
         sty("SUM", size=8, color=BLUE, before=2, after=4),
     ))
 
     if not hits:
         story.append(Paragraph(
-            "No stocks found with Pin Bar/Hammer/Doji bullish candle touching VWMA(20) today.",
+            "No stocks found with Pin Bar/Hammer/Doji bullish candle today.",
             sty("NF", size=9, color=GRAY),
         ))
     else:
-        hdr = ["#", "Symbol", "Pattern", "LTP", "Open", "High", "Low", "VWMA(20)", "Dist%", "Chg%", "Body%"]
-        col_w = [7*mm, 24*mm, 30*mm, 18*mm, 18*mm, 18*mm, 18*mm, 18*mm, 12*mm, 13*mm, 11*mm]
+        hdr = ["#", "Symbol", "Pattern", "LTP", "Open", "High", "Low", "Chg%", "Body%"]
+        col_w = [7*mm, 26*mm, 38*mm, 22*mm, 22*mm, 22*mm, 22*mm, 16*mm, 14*mm]
         rows = [hdr]
         for i, h in enumerate(hits, 1):
             rows.append([
-                str(i),
-                h["symbol"],
+                str(i), h["symbol"],
                 " | ".join(h["patterns"]),
-                f"{h['ltp']:,.2f}",
-                f"{h['open']:,.2f}",
-                f"{h['high']:,.2f}",
-                f"{h['low']:,.2f}",
-                f"{h['vwma']:,.2f}",
-                f"{h['dist_pct']:.2f}%",
-                f"{h['pchange']:+.2f}%",
-                f"{h['body_pct']:.0f}%",
+                f"{h['ltp']:,.2f}", f"{h['open']:,.2f}",
+                f"{h['high']:,.2f}", f"{h['low']:,.2f}",
+                f"{h['pchange']:+.2f}%", f"{h['body_pct']:.0f}%",
             ])
 
         t = Table(rows, colWidths=col_w)
@@ -267,10 +250,10 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
             ("BACKGROUND",    (0, 0), (-1, 0), TEAL),
             ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
             ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, 0), 7),
+            ("FONTSIZE",      (0, 0), (-1, 0), 7.5),
             ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
             ("ALIGN",         (1, 1), (2, -1), "LEFT"),
-            ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
+            ("FONTSIZE",      (0, 1), (-1, -1), 7),
             ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
             ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
             ("TOPPADDING",    (0, 0), (-1, -1), 3),
@@ -281,17 +264,15 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
             ts.add("TEXTCOLOR",  (2, i), (2, i), TEAL)
             ts.add("FONTNAME",   (2, i), (2, i), "Helvetica-Bold")
             pch_clr = GREEN if h["pchange"] >= 0 else colors.HexColor("#dc2626")
-            ts.add("TEXTCOLOR",  (9, i), (9, i), pch_clr)
-            ts.add("FONTNAME",   (9, i), (9, i), "Helvetica-Bold")
+            ts.add("TEXTCOLOR",  (7, i), (7, i), pch_clr)
+            ts.add("FONTNAME",   (7, i), (7, i), "Helvetica-Bold")
         t.setStyle(ts)
         story.append(t)
 
     story.append(Spacer(1, 6*mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
     story.append(Paragraph(
-        f"Generated by RRE Market Scanner  --  "
-        f"{_now_ist().strftime('%d %b %Y %H:%M IST')}  --  "
-        "Universe: TSR weekly/monthly support + long buildup + signals",
+        f"Generated by RRE Market Scanner  --  {_now_ist().strftime('%d %b %Y %H:%M IST')}  --  Nifty 200",
         sty("FT", size=6.5, color=GRAY, align=TA_CENTER, before=6),
     ))
 
@@ -332,8 +313,8 @@ async def send_vwma_candle_report() -> None:
         top5 = "  ".join(h["symbol"] for h in hits[:5])
 
         caption = (
-            f"<b>Pin Bar / Hammer / Doji + Bullish + VWMA(20)  --  {date_str}</b>\n"
-            f"<i>Bullish candle touching VWMA(20) daily  --  Nifty 200</i>\n\n"
+            f"<b>Reversal Pattern + Bullish Candle  --  {date_str}</b>\n"
+            f"<i>Pin Bar / Hammer / Doji  AND  close &gt; open  --  Nifty 200 daily</i>\n\n"
             f"<b>{len(hits)}</b> stocks matched\n"
             f"<b>Patterns:</b> {pat_summary}\n\n"
             f"<b>Top picks:</b> {top5}"
