@@ -497,30 +497,31 @@ def _build_eod_pdf(
     if vwma_hits:
         TEAL2 = colors.HexColor("#0891b2")
         _section_header(
-            f"VWMA(20) Combo Setup  ({len(vwma_hits)} stocks)",
-            "Day N-1: Doji/Hammer/Pin Bar at VWMA(20)  +  Day N: Bullish confirmation  --  TSR universe",
+            f"Pin Bar / Hammer / Doji  +  Bullish  +  VWMA(20)  ({len(vwma_hits)} stocks)",
+            "Bullish candle touching VWMA(20) daily  --  Nifty 200 / TSR universe",
             TEAL2,
         )
-        v_hdr = ["#", "Symbol", "LTP", "VWMA(20)", "Dist%", "Reversal Candle", "Confirm Candle", "Chg%"]
-        cw_v  = [7*mm, 26*mm, 20*mm, 20*mm, 13*mm, 36*mm, 36*mm, 14*mm]
+        v_hdr = ["#", "Symbol", "Pattern", "LTP", "High", "Low", "VWMA(20)", "Dist%", "Chg%"]
+        cw_v  = [7*mm, 24*mm, 32*mm, 18*mm, 18*mm, 18*mm, 20*mm, 12*mm, 14*mm]
         v_rows = [v_hdr]
         for i, h in enumerate(vwma_hits[:20], 1):
-            pat = " | ".join(h.get("reversal_pattern", []))
             v_rows.append([
                 str(i), h["symbol"],
-                f"{h['ltp']:,.2f}", f"{h['vwma']:,.2f}",
+                " | ".join(h.get("patterns", [])),
+                f"{h['ltp']:,.2f}",
+                f"{h.get('high', h['ltp']):,.2f}",
+                f"{h.get('low', h['ltp']):,.2f}",
+                f"{h['vwma']:,.2f}",
                 f"{h['dist_pct']:.2f}%",
-                f"{pat}  C:{h.get('rev_c', '')}",
-                f"Bullish  C:{h.get('con_c', '')}",
                 f"{h['pchange']:+.2f}%",
             ])
         t_v, ts_v = _simple_table(v_rows, cw_v, TEAL2)
         for i, h in enumerate(vwma_hits[:20], 1):
-            ts_v.add("TEXTCOLOR", (5, i), (5, i), AMBER)
-            ts_v.add("TEXTCOLOR", (6, i), (6, i), GREEN)
+            ts_v.add("TEXTCOLOR", (2, i), (2, i), TEAL2)
+            ts_v.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
             pch_clr = GREEN if h["pchange"] >= 0 else RED
-            ts_v.add("TEXTCOLOR", (7, i), (7, i), pch_clr)
-            ts_v.add("FONTNAME",  (7, i), (7, i), "Helvetica-Bold")
+            ts_v.add("TEXTCOLOR", (8, i), (8, i), pch_clr)
+            ts_v.add("FONTNAME",  (8, i), (8, i), "Helvetica-Bold")
         t_v.setStyle(ts_v)
         story.append(t_v)
         story.append(Spacer(1, 6*mm))

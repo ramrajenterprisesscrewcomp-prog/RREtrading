@@ -129,55 +129,51 @@ async def scan_vwma_candle() -> list[dict]:
     async def _check(sym: str, client: httpx.AsyncClient) -> dict | None:
         async with sem:
             data = await _fetch_daily(sym, client)
-            if not data or len(data["closes"]) < VWMA_LEN + 2:
+            if not data or len(data["closes"]) < VWMA_LEN + 1:
                 return None
 
             vwma = _calc_vwma(data["closes"], data["volumes"], VWMA_LEN)
             if not vwma:
                 return None
 
-            # ── Day N-1: reversal candle (Doji / Pin Bar / Hammer) ──────────
-            o1 = data["opens"][-2];  h1 = data["highs"][-2]
-            l1 = data["lows"][-2];   c1 = data["closes"][-2]
-            prev_patterns = detect_pattern(o1, h1, l1, c1)
-            reversal = [p for p in prev_patterns if p in _REVERSAL_PATTERNS]
-            if not reversal:
+            # Today's candle
+            o = data["opens"][-1];  h = data["highs"][-1]
+            l = data["lows"][-1];   c = data["closes"][-1]
+
+            # Must be bullish (close > open)
+            if c <= o:
                 return None
 
-            # ── Day N: bullish confirmation (close > open) ──────────────────
-            o2 = data["opens"][-1];  h2 = data["highs"][-1]
-            l2 = data["lows"][-1];   c2 = data["closes"][-1]
-            if c2 <= o2:
+            # Must match at least one reversal pattern
+            patterns = detect_pattern(o, h, l, c)
+            matched = [p for p in patterns if p in _REVERSAL_PATTERNS]
+            if not matched:
                 return None
 
-            # ── VWMA touch: nearest point of either candle to VWMA ──────────
+            # VWMA touch: candle low or close within threshold
             touch_dist = min(
-                abs(l1 - vwma) / vwma * 100,   # reversal candle low
-                abs(c1 - vwma) / vwma * 100,   # reversal candle close
-                abs(l2 - vwma) / vwma * 100,   # confirm candle low
-                abs(c2 - vwma) / vwma * 100,   # confirm candle close
+                abs(l - vwma) / vwma * 100,
+                abs(c - vwma) / vwma * 100,
             )
             if touch_dist > VWMA_TOUCH_PCT:
                 return None
 
-            prev_ref = data["closes"][-3] if len(data["closes"]) >= 3 else c1
-            pchange  = round((c2 - prev_ref) / prev_ref * 100, 2) if prev_ref else 0.0
-            body_pct = round((c2 - o2) / (h2 - l2) * 100, 1) if (h2 - l2) else 0.0
+            prev_c  = data["closes"][-2] if len(data["closes"]) >= 2 else c
+            pchange = round((c - prev_c) / prev_c * 100, 2) if prev_c else 0.0
+            hl      = h - l
+            body_pct = round((c - o) / hl * 100, 1) if hl else 0.0
 
             return {
-                "symbol":           sym,
-                "ltp":              round(c2, 2),
-                "vwma":             round(vwma, 2),
-                "dist_pct":         round(touch_dist, 2),
-                "reversal_pattern": reversal,
-                "pchange":          pchange,
-                "body_pct":         body_pct,
-                # reversal candle
-                "rev_o": round(o1, 2), "rev_h": round(h1, 2),
-                "rev_l": round(l1, 2), "rev_c": round(c1, 2),
-                # confirm candle
-                "con_o": round(o2, 2), "con_h": round(h2, 2),
-                "con_l": round(l2, 2), "con_c": round(c2, 2),
+                "symbol":   sym,
+                "ltp":      round(c, 2),
+                "vwma":     round(vwma, 2),
+                "dist_pct": round(touch_dist, 2),
+                "patterns": matched,
+                "pchange":  pchange,
+                "body_pct": body_pct,
+                "open":     round(o, 2),
+                "high":     round(h, 2),
+                "low":      round(l, 2),
             }
 
     async with httpx.AsyncClient(
@@ -229,13 +225,8 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
 
     story.append(Paragraph("RRE Market Scanner", sty("T", size=15, align=TA_CENTER, bold=True, after=3)))
     story.append(Paragraph(
-        "VWMA(20) Combo Setup  --  Daily  --  TSR Universe",
-        sty("S", size=8, color=GRAY, align=TA_CENTER, after=1),
-    ))
-    story.append(Paragraph(
-        "Day N-1: Doji / Pin Bar / Hammer at VWMA(20)   +   Day N: Bullish Confirmation",
-        sty("S2", size=7.5, color=TEAL, align=TA_CENTER, after=2,
-            font="Helvetica-Oblique"),
+        "Pin Bar / Hammer / Doji  +  Bullish  +  VWMA(20) Touch  --  Daily",
+        sty("S", size=8, color=GRAY, align=TA_CENTER, after=2),
     ))
     story.append(Paragraph(date_str, sty("D", size=8, color=GRAY, align=TA_CENTER, after=4)))
     story.append(HRFlowable(width="100%", thickness=1.5, color=TEAL))
@@ -243,34 +234,30 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
 
     story.append(Paragraph(
         f"Stocks found: {len(hits)}   --   "
-        f"Reversal patterns: Doji | Hammer | Bullish Pin Bar   --   "
-        f"VWMA touch: within {VWMA_TOUCH_PCT}% of VWMA(20) daily",
+        f"Pattern + Bullish (close > open) + within {VWMA_TOUCH_PCT}% of VWMA(20)",
         sty("SUM", size=8, color=BLUE, before=2, after=4),
     ))
 
     if not hits:
         story.append(Paragraph(
-            "No stocks found matching the 2-candle VWMA setup today.",
+            "No stocks found with Pin Bar/Hammer/Doji bullish candle touching VWMA(20) today.",
             sty("NF", size=9, color=GRAY),
         ))
     else:
-        # ── Main table ───────────────────────────────────────────────────────
-        hdr = ["#", "Symbol", "LTP", "VWMA(20)", "Dist%",
-               "Reversal Candle (N-1)", "Confirm Candle (N)", "Chg%", "Body%"]
-        col_w = [7*mm, 26*mm, 20*mm, 20*mm, 13*mm, 34*mm, 34*mm, 14*mm, 13*mm]
+        hdr = ["#", "Symbol", "Pattern", "LTP", "Open", "High", "Low", "VWMA(20)", "Dist%", "Chg%", "Body%"]
+        col_w = [7*mm, 24*mm, 30*mm, 18*mm, 18*mm, 18*mm, 18*mm, 18*mm, 12*mm, 13*mm, 11*mm]
         rows = [hdr]
         for i, h in enumerate(hits, 1):
-            pat_str  = " | ".join(h["reversal_pattern"])
-            rev_desc = f"{pat_str}  O:{h['rev_o']}  C:{h['rev_c']}"
-            con_desc = f"Bullish  O:{h['con_o']}  C:{h['con_c']}"
             rows.append([
                 str(i),
                 h["symbol"],
+                " | ".join(h["patterns"]),
                 f"{h['ltp']:,.2f}",
+                f"{h['open']:,.2f}",
+                f"{h['high']:,.2f}",
+                f"{h['low']:,.2f}",
                 f"{h['vwma']:,.2f}",
                 f"{h['dist_pct']:.2f}%",
-                rev_desc,
-                con_desc,
                 f"{h['pchange']:+.2f}%",
                 f"{h['body_pct']:.0f}%",
             ])
@@ -282,8 +269,7 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
             ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE",      (0, 0), (-1, 0), 7),
             ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
-            ("ALIGN",         (1, 1), (1, -1), "LEFT"),
-            ("ALIGN",         (5, 1), (6, -1), "LEFT"),
+            ("ALIGN",         (1, 1), (2, -1), "LEFT"),
             ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
             ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
             ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
@@ -291,13 +277,12 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ])
         for i, h in enumerate(hits, start=1):
-            bg = ALTROW if i % 2 == 0 else colors.white
-            ts.add("BACKGROUND", (0, i), (-1, i), bg)
+            ts.add("BACKGROUND", (0, i), (-1, i), ALTROW if i % 2 == 0 else colors.white)
+            ts.add("TEXTCOLOR",  (2, i), (2, i), TEAL)
+            ts.add("FONTNAME",   (2, i), (2, i), "Helvetica-Bold")
             pch_clr = GREEN if h["pchange"] >= 0 else colors.HexColor("#dc2626")
-            ts.add("TEXTCOLOR", (7, i), (7, i), pch_clr)
-            ts.add("FONTNAME",  (7, i), (7, i), "Helvetica-Bold")
-            ts.add("TEXTCOLOR", (5, i), (5, i), AMBER)    # reversal candle amber
-            ts.add("TEXTCOLOR", (6, i), (6, i), GREEN)    # confirm candle green
+            ts.add("TEXTCOLOR",  (9, i), (9, i), pch_clr)
+            ts.add("FONTNAME",   (9, i), (9, i), "Helvetica-Bold")
         t.setStyle(ts)
         story.append(t)
 
