@@ -620,6 +620,17 @@ async def eod_report_endpoint():
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
 
 
+@app.post("/api/vwma-candle-report")
+async def vwma_candle_report_endpoint():
+    """Trigger VWMA(20) + candle pattern scan on TSR stock universe."""
+    try:
+        from services.vwma_candle_service import send_vwma_candle_report
+        asyncio.create_task(send_vwma_candle_report())
+        return {"status": "generating", "message": "VWMA candle report started — PDF will be sent to Telegram"}
+    except Exception as exc:
+        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
 @app.get("/api/test-telegram")
 async def test_telegram():
     """Test Telegram bot connectivity — use after adding @open_nifty_bot to your group."""

@@ -668,4 +668,10 @@ async def candle_alert_loop() -> None:
                 and fired_today != today_key):
             fired_today = today_key
             await scan_and_send()
+            # Also send VWMA candle setup report from TSR universe
+            try:
+                from services.vwma_candle_service import send_vwma_candle_report
+                await send_vwma_candle_report()
+            except Exception as e:
+                logger.warning("VWMA candle report failed: %s", e)
         await asyncio.sleep(60)
