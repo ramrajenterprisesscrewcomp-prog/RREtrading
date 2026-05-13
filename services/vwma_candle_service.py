@@ -25,7 +25,10 @@ _YF_HEADERS = {
     "Accept": "application/json",
 }
 
-_REVERSAL_PATTERNS = {"Doji", "Long Legged Doji", "Hammer", "Bullish Pin Bar"}
+_REVERSAL_PATTERNS = {
+    "Doji", "Long Legged Doji", "Hammer", "Inverted Hammer",
+    "Bullish Pin Bar", "Bearish Pin Bar", "Spinning Top",
+}
 
 
 async def _fetch_daily(symbol: str, client: httpx.AsyncClient) -> dict | None:

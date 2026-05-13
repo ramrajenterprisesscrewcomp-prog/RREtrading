@@ -620,13 +620,24 @@ async def eod_report_endpoint():
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
 
 
+@app.post("/api/pm-report")
+async def pm_report_endpoint():
+    """Manually trigger the 2:45 PM positional report — builds PDF and sends to Telegram."""
+    try:
+        from services.pm_report_service import pm_scan_and_send
+        asyncio.create_task(pm_scan_and_send())
+        return {"status": "generating", "message": "PM report started — PDF will be sent to Telegram"}
+    except Exception as exc:
+        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
 @app.post("/api/vwma-candle-report")
 async def vwma_candle_report_endpoint():
-    """Trigger VWMA(20) + candle pattern scan on TSR stock universe."""
+    """Trigger Doji/Hammer/Pin Bar + Bullish Engulfing scan on Nifty 500."""
     try:
         from services.vwma_candle_service import send_vwma_candle_report
         asyncio.create_task(send_vwma_candle_report())
-        return {"status": "generating", "message": "VWMA candle report started — PDF will be sent to Telegram"}
+        return {"status": "generating", "message": "Reversal+Engulfing report started — PDF will be sent to Telegram"}
     except Exception as exc:
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
 
