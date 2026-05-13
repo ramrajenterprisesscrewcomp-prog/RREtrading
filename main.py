@@ -608,42 +608,6 @@ async def pivot_signals_endpoint(force: bool = False):
         })
 
 
-@app.get("/api/recommendations")
-async def recommendations_endpoint(force: bool = False):
-    """AI stock recommendations: commodities · geopolitics · F&O · sector rotation · Nifty beta."""
-    try:
-        from services.recommendation_service import generate_recommendations, _cache as _rec_cache
-        if force and "r" in _rec_cache:
-            del _rec_cache["r"]
-        data = await generate_recommendations(force=force)
-        return JSONResponse(content=data)
-    except Exception as exc:
-        return JSONResponse(content={
-            "market_thesis": "",
-            "pre_analysis_summary": {},
-            "recommendations": [],
-            "stocks_to_avoid": [],
-            "watchlist": [],
-            "commodity_signals": [],
-            "geo_themes_active": [],
-            "error": str(exc),
-            "timestamp": datetime.now().isoformat(),
-        })
-
-
-@app.post("/api/send-recommendations-pdf")
-async def send_recommendations_pdf_endpoint():
-    """Build AI Recommendations PDF and send to Telegram."""
-    try:
-        from services.recommendation_service import (
-            generate_recommendations, send_recommendations_report, _cache as _rec_cache,
-        )
-        rec_data = _rec_cache.get("r") if "r" in _rec_cache else await generate_recommendations()
-        asyncio.create_task(send_recommendations_report(rec_data))
-        return {"status": "sending", "picks": len(rec_data.get("recommendations", []))}
-    except Exception as exc:
-        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
-
 
 @app.post("/api/eod-report")
 async def eod_report_endpoint():
