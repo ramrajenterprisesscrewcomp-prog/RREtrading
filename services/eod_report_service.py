@@ -579,16 +579,23 @@ async def eod_scan_and_send() -> None:
     date_str = datetime.now().strftime("%d %b %Y")
 
     try:
-        stocks, buildup_raw, tsr_bu, runners, vwma_hits = await asyncio.gather(
+        stocks, buildup_raw, tsr_bu, runners = await asyncio.gather(
             get_nifty500_ohlc(),
             get_fno_oi_buildup(15),
             get_tsr_buildup(),
             scan_tomorrow_runners(),
-            scan_vwma_candle(),
         )
 
-        stocks   = stocks or []
-        runners  = runners or []
+        stocks  = stocks or []
+        runners = runners or []
+
+        # VWMA scan — isolated so a failure never blocks the main report
+        vwma_hits = []
+        try:
+            vwma_hits = await scan_vwma_candle()
+            logger.info("EOD VWMA scan: %d hits", len(vwma_hits))
+        except Exception as e:
+            logger.warning("EOD VWMA scan failed: %s", e)
 
         # Merge NSE + TSR long buildup
         nse_lb = (buildup_raw or {}).get("Long Buildup", [])

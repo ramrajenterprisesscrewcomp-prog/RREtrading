@@ -110,7 +110,17 @@ async def scan_vwma_candle() -> list[dict]:
 
     symbols = sorted(raw_syms)
     if not symbols:
-        logger.warning("VWMA scan: no symbols from TSR cache — cache may be empty")
+        # TSR cache empty — fall back to Nifty 200
+        logger.warning("VWMA scan: TSR cache empty, falling back to Nifty 200")
+        try:
+            from services.pivot_scanner_service import _fetch_nifty200_live
+            n200 = await _fetch_nifty200_live()
+            symbols = sorted({s["symbol"] for s in n200 if s.get("symbol")})
+            logger.info("VWMA scan fallback: %d Nifty 200 symbols", len(symbols))
+        except Exception as e:
+            logger.warning("VWMA scan Nifty 200 fallback failed: %s", e)
+            return []
+    if not symbols:
         return []
 
     logger.info("VWMA scan: checking %d TSR symbols", len(symbols))

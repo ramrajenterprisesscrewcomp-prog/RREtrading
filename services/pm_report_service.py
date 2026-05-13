@@ -603,12 +603,19 @@ async def pm_scan_and_send() -> None:
         from services.vwma_candle_service import scan_vwma_candle
 
         # Fast parallel fetches — TSR reads from in-memory cache (non-blocking)
-        stocks, buildup_raw, tsr_bu, vwma_hits = await asyncio.gather(
+        stocks, buildup_raw, tsr_bu = await asyncio.gather(
             get_nifty500_ohlc(),
             get_fno_oi_buildup(15),
             get_tsr_buildup(),
-            scan_vwma_candle(),
         )
+
+        # VWMA scan — isolated so a failure never blocks the main report
+        vwma_hits = []
+        try:
+            vwma_hits = await scan_vwma_candle()
+            logger.info("PM VWMA scan: %d hits", len(vwma_hits))
+        except Exception as e:
+            logger.warning("PM VWMA scan failed: %s", e)
 
         # ── Merge NSE FNO + TSR Pro long buildup with source tags ────────────
         nse_lb = (buildup_raw or {}).get("Long Buildup", [])
