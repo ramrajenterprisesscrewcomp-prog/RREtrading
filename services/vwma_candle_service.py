@@ -25,7 +25,7 @@ _YF_HEADERS = {
 }
 
 VWMA_LEN       = 20
-VWMA_TOUCH_PCT = 1.0   # within 1% of VWMA counts as "touching"
+VWMA_TOUCH_PCT = 1.5   # within 1.5% of VWMA counts as "touching"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -78,17 +78,23 @@ async def _fetch_daily(symbol: str, client: httpx.AsyncClient) -> dict | None:
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
+_REVERSAL_PATTERNS = {"Doji", "Long Legged Doji", "Hammer", "Bullish Pin Bar"}
+
+
 async def scan_vwma_candle() -> list[dict]:
     """
-    Scan TSR stock universe for VWMA(20) touch + candle pattern on daily chart.
-    Returns list of hits sorted by VWMA distance (closest first).
+    2-candle combo setup from TSR stock universe:
+      Day N-1 : Doji / Pin Bar / Hammer at or near VWMA(20)
+      Day N   : Bullish confirmation candle (close > open)
+      VWMA    : low or close of either candle within VWMA_TOUCH_PCT of VWMA(20)
+
+    Returns list of hits sorted by VWMA touch distance (closest first).
     """
     from services.tsr_service import get_tsr_all
     from services.candle_service import detect_pattern
 
     tsr = await get_tsr_all()
 
-    # Collect symbols from all TSR sources
     raw_syms: set[str] = set()
     for src_key in ("weekly_support", "monthly_support", "signals"):
         for row in tsr.get(src_key, []):
@@ -108,49 +114,60 @@ async def scan_vwma_candle() -> list[dict]:
         return []
 
     logger.info("VWMA scan: checking %d TSR symbols", len(symbols))
-
     sem = asyncio.Semaphore(15)
 
     async def _check(sym: str, client: httpx.AsyncClient) -> dict | None:
         async with sem:
             data = await _fetch_daily(sym, client)
-            if not data:
+            if not data or len(data["closes"]) < VWMA_LEN + 2:
                 return None
 
             vwma = _calc_vwma(data["closes"], data["volumes"], VWMA_LEN)
             if not vwma:
                 return None
 
-            ltp      = data["closes"][-1]
-            dist_pct = abs(ltp - vwma) / vwma * 100
-            if dist_pct > VWMA_TOUCH_PCT:
+            # ── Day N-1: reversal candle (Doji / Pin Bar / Hammer) ──────────
+            o1 = data["opens"][-2];  h1 = data["highs"][-2]
+            l1 = data["lows"][-2];   c1 = data["closes"][-2]
+            prev_patterns = detect_pattern(o1, h1, l1, c1)
+            reversal = [p for p in prev_patterns if p in _REVERSAL_PATTERNS]
+            if not reversal:
                 return None
 
-            o = data["opens"][-1]
-            h = data["highs"][-1]
-            l = data["lows"][-1]
-            c = data["closes"][-1]
-
-            patterns = detect_pattern(o, h, l, c)
-            # Keep only the target patterns
-            target = [p for p in patterns if p in (
-                "Doji", "Long Legged Doji", "Hammer",
-                "Bullish Pin Bar", "Long White Line",
-            )]
-            if not target:
+            # ── Day N: bullish confirmation (close > open) ──────────────────
+            o2 = data["opens"][-1];  h2 = data["highs"][-1]
+            l2 = data["lows"][-1];   c2 = data["closes"][-1]
+            if c2 <= o2:
                 return None
 
-            prev_c = data["closes"][-2] if len(data["closes"]) >= 2 else c
-            pchange = round((c - prev_c) / prev_c * 100, 2) if prev_c else 0.0
+            # ── VWMA touch: nearest point of either candle to VWMA ──────────
+            touch_dist = min(
+                abs(l1 - vwma) / vwma * 100,   # reversal candle low
+                abs(c1 - vwma) / vwma * 100,   # reversal candle close
+                abs(l2 - vwma) / vwma * 100,   # confirm candle low
+                abs(c2 - vwma) / vwma * 100,   # confirm candle close
+            )
+            if touch_dist > VWMA_TOUCH_PCT:
+                return None
+
+            prev_ref = data["closes"][-3] if len(data["closes"]) >= 3 else c1
+            pchange  = round((c2 - prev_ref) / prev_ref * 100, 2) if prev_ref else 0.0
+            body_pct = round((c2 - o2) / (h2 - l2) * 100, 1) if (h2 - l2) else 0.0
 
             return {
-                "symbol":   sym,
-                "ltp":      round(ltp, 2),
-                "vwma":     round(vwma, 2),
-                "dist_pct": round(dist_pct, 2),
-                "patterns": target,
-                "pchange":  pchange,
-                "above_vwma": ltp >= vwma,
+                "symbol":           sym,
+                "ltp":              round(c2, 2),
+                "vwma":             round(vwma, 2),
+                "dist_pct":         round(touch_dist, 2),
+                "reversal_pattern": reversal,
+                "pchange":          pchange,
+                "body_pct":         body_pct,
+                # reversal candle
+                "rev_o": round(o1, 2), "rev_h": round(h1, 2),
+                "rev_l": round(l1, 2), "rev_c": round(c1, 2),
+                # confirm candle
+                "con_o": round(o2, 2), "con_h": round(h2, 2),
+                "con_l": round(l2, 2), "con_c": round(c2, 2),
             }
 
     async with httpx.AsyncClient(
@@ -158,10 +175,7 @@ async def scan_vwma_candle() -> list[dict]:
     ) as client:
         raw = await asyncio.gather(*[_check(s, client) for s in symbols])
 
-    hits = sorted(
-        [r for r in raw if r],
-        key=lambda x: x["dist_pct"],
-    )
+    hits = sorted([r for r in raw if r], key=lambda x: x["dist_pct"])
     logger.info("VWMA candle scan: %d hits / %d symbols", len(hits), len(symbols))
     return hits
 
@@ -205,41 +219,50 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
 
     story.append(Paragraph("RRE Market Scanner", sty("T", size=15, align=TA_CENTER, bold=True, after=3)))
     story.append(Paragraph(
-        "VWMA(20) Touch + Candle Pattern  --  Daily Setup  --  TSR Universe",
-        sty("S", size=8, color=GRAY, align=TA_CENTER, after=2),
+        "VWMA(20) Combo Setup  --  Daily  --  TSR Universe",
+        sty("S", size=8, color=GRAY, align=TA_CENTER, after=1),
+    ))
+    story.append(Paragraph(
+        "Day N-1: Doji / Pin Bar / Hammer at VWMA(20)   +   Day N: Bullish Confirmation",
+        sty("S2", size=7.5, color=TEAL, align=TA_CENTER, after=2,
+            font="Helvetica-Oblique"),
     ))
     story.append(Paragraph(date_str, sty("D", size=8, color=GRAY, align=TA_CENTER, after=4)))
     story.append(HRFlowable(width="100%", thickness=1.5, color=TEAL))
     story.append(Spacer(1, 4*mm))
 
     story.append(Paragraph(
-        f"Stocks found: {len(hits)}  --  "
-        "Candle patterns: Doji | Hammer | Bullish Pin Bar | Long White Line  --  "
-        f"VWMA touch: within {VWMA_TOUCH_PCT}% of VWMA(20)",
+        f"Stocks found: {len(hits)}   --   "
+        f"Reversal patterns: Doji | Hammer | Bullish Pin Bar   --   "
+        f"VWMA touch: within {VWMA_TOUCH_PCT}% of VWMA(20) daily",
         sty("SUM", size=8, color=BLUE, before=2, after=4),
     ))
 
     if not hits:
         story.append(Paragraph(
-            "No stocks found touching VWMA(20) with a pattern signal today.",
+            "No stocks found matching the 2-candle VWMA setup today.",
             sty("NF", size=9, color=GRAY),
         ))
     else:
-        hdr = ["#", "Symbol", "LTP", "VWMA(20)", "Dist %", "Chg %", "Pattern", "Side"]
-        col_w = [8*mm, 28*mm, 22*mm, 22*mm, 16*mm, 16*mm, 45*mm, 18*mm]
+        # ── Main table ───────────────────────────────────────────────────────
+        hdr = ["#", "Symbol", "LTP", "VWMA(20)", "Dist%",
+               "Reversal Candle (N-1)", "Confirm Candle (N)", "Chg%", "Body%"]
+        col_w = [7*mm, 26*mm, 20*mm, 20*mm, 13*mm, 34*mm, 34*mm, 14*mm, 13*mm]
         rows = [hdr]
         for i, h in enumerate(hits, 1):
-            pat_str = " | ".join(h["patterns"])
-            side    = "Above" if h["above_vwma"] else "Below"
+            pat_str  = " | ".join(h["reversal_pattern"])
+            rev_desc = f"{pat_str}  O:{h['rev_o']}  C:{h['rev_c']}"
+            con_desc = f"Bullish  O:{h['con_o']}  C:{h['con_c']}"
             rows.append([
                 str(i),
                 h["symbol"],
                 f"{h['ltp']:,.2f}",
                 f"{h['vwma']:,.2f}",
                 f"{h['dist_pct']:.2f}%",
+                rev_desc,
+                con_desc,
                 f"{h['pchange']:+.2f}%",
-                pat_str,
-                side,
+                f"{h['body_pct']:.0f}%",
             ])
 
         t = Table(rows, colWidths=col_w)
@@ -247,11 +270,11 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
             ("BACKGROUND",    (0, 0), (-1, 0), TEAL),
             ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
             ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, 0), 7.5),
+            ("FONTSIZE",      (0, 0), (-1, 0), 7),
             ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
             ("ALIGN",         (1, 1), (1, -1), "LEFT"),
-            ("ALIGN",         (6, 1), (6, -1), "LEFT"),
-            ("FONTSIZE",      (0, 1), (-1, -1), 7),
+            ("ALIGN",         (5, 1), (6, -1), "LEFT"),
+            ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
             ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
             ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
             ("TOPPADDING",    (0, 0), (-1, -1), 3),
@@ -260,13 +283,11 @@ def _build_vwma_pdf(hits: list[dict], date_str: str) -> bytes:
         for i, h in enumerate(hits, start=1):
             bg = ALTROW if i % 2 == 0 else colors.white
             ts.add("BACKGROUND", (0, i), (-1, i), bg)
-            # Color pchange
             pch_clr = GREEN if h["pchange"] >= 0 else colors.HexColor("#dc2626")
-            ts.add("TEXTCOLOR", (5, i), (5, i), pch_clr)
-            ts.add("FONTNAME",  (5, i), (5, i), "Helvetica-Bold")
-            # Color side
-            side_clr = GREEN if h["above_vwma"] else AMBER
-            ts.add("TEXTCOLOR", (7, i), (7, i), side_clr)
+            ts.add("TEXTCOLOR", (7, i), (7, i), pch_clr)
+            ts.add("FONTNAME",  (7, i), (7, i), "Helvetica-Bold")
+            ts.add("TEXTCOLOR", (5, i), (5, i), AMBER)    # reversal candle amber
+            ts.add("TEXTCOLOR", (6, i), (6, i), GREEN)    # confirm candle green
         t.setStyle(ts)
         story.append(t)
 
@@ -304,21 +325,22 @@ async def send_vwma_candle_report() -> None:
 
         pdf_bytes = await asyncio.to_thread(_build_vwma_pdf, hits, date_str)
 
-        # Telegram caption (summary)
-        bull_hits = [h for h in hits if h["above_vwma"]]
-        pat_count = {}
+        # Telegram caption
+        pat_count: dict[str, int] = {}
         for h in hits:
-            for p in h["patterns"]:
+            for p in h["reversal_pattern"]:
                 pat_count[p] = pat_count.get(p, 0) + 1
 
-        pat_summary = "  |  ".join(f"{p}: {n}" for p, n in sorted(pat_count.items(), key=lambda x: -x[1]))
+        pat_summary = "  |  ".join(
+            f"{p}: {n}" for p, n in sorted(pat_count.items(), key=lambda x: -x[1])
+        )
         top5 = "  ".join(h["symbol"] for h in hits[:5])
 
         caption = (
-            f"<b>VWMA(20) Candle Setup  --  {date_str}</b>\n"
-            f"TSR universe  --  {len(hits)} stocks touching VWMA(20)\n\n"
-            f"<b>Patterns:</b> {pat_summary}\n"
-            f"<b>Above VWMA:</b> {len(bull_hits)}  |  <b>Below:</b> {len(hits) - len(bull_hits)}\n\n"
+            f"<b>VWMA(20) Combo Setup  --  {date_str}</b>\n"
+            f"<i>Doji/Hammer/Pin Bar at VWMA + Bullish Confirmation  --  Daily</i>\n\n"
+            f"TSR universe  --  <b>{len(hits)}</b> stocks matched\n"
+            f"<b>Reversal patterns:</b> {pat_summary}\n\n"
             f"<b>Top picks:</b> {top5}"
         )
 
