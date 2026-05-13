@@ -482,25 +482,24 @@ def _build_pm_pdf(
         ))
         story.append(Spacer(1, 6*mm))
 
-    # ── 5. VWMA(20) Combo Setup ───────────────────────────────────────────────
+    # ── 5. Reversal + Engulfing Setup ─────────────────────────────────────────
     if vwma_hits:
         TEAL2 = colors.HexColor("#0891b2")
         _section_header(
-            f"Reversal Pattern + Bullish Candle  ({len(vwma_hits)} stocks)",
-            "Pin Bar / Hammer / Doji  AND  close > open  --  Nifty 200 daily",
+            f"Doji / Hammer / Pin Bar + Bullish Engulfing  ({len(vwma_hits)} stocks)",
+            "Day N-1: Reversal candle  |  Day N: Bullish Engulfing  --  Nifty 500 daily",
             TEAL2,
         )
-        v_hdr = ["#", "Symbol", "Pattern", "LTP", "Open", "High", "Low", "Chg%", "Body%"]
+        v_hdr = ["#", "Symbol", "Reversal (N-1)", "Engulfing (N)", "LTP", "Chg%", "Body%"]
         v_rows = [v_hdr]
-        cw_v = [7*mm, 24*mm, 36*mm, 20*mm, 20*mm, 20*mm, 20*mm, 15*mm, 13*mm]
+        cw_v = [7*mm, 24*mm, 46*mm, 46*mm, 20*mm, 15*mm, 13*mm]
         for i, h in enumerate(vwma_hits[:20], 1):
+            pat = " | ".join(h.get("patterns", []))
             v_rows.append([
                 str(i), h["symbol"],
-                " | ".join(h.get("patterns", [])),
+                f"{pat}  O:{h.get('rev_o','')}  C:{h.get('rev_c','')}",
+                f"Engulfing  O:{h.get('eng_o','')}  C:{h.get('eng_c','')}",
                 f"{h['ltp']:,.2f}",
-                f"{h.get('open', h['ltp']):,.2f}",
-                f"{h.get('high', h['ltp']):,.2f}",
-                f"{h.get('low', h['ltp']):,.2f}",
                 f"{h['pchange']:+.2f}%",
                 f"{h.get('body_pct', 0):.0f}%",
             ])
@@ -511,8 +510,7 @@ def _build_pm_pdf(
             ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE",      (0, 0), (-1, 0), 7),
             ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
-            ("ALIGN",         (1, 1), (1, -1), "LEFT"),
-            ("ALIGN",         (5, 1), (6, -1), "LEFT"),
+            ("ALIGN",         (1, 1), (3, -1), "LEFT"),
             ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
             ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
             ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
@@ -521,11 +519,12 @@ def _build_pm_pdf(
         ])
         for i, h in enumerate(vwma_hits[:20], 1):
             ts_v.add("BACKGROUND", (0, i), (-1, i), ALT_ROW if i % 2 == 0 else colors.white)
-            ts_v.add("TEXTCOLOR",  (2, i), (2, i), colors.HexColor("#0891b2"))
+            ts_v.add("TEXTCOLOR",  (2, i), (2, i), AMBER)
             ts_v.add("FONTNAME",   (2, i), (2, i), "Helvetica-Bold")
+            ts_v.add("TEXTCOLOR",  (3, i), (3, i), GREEN)
             pch_clr = GREEN if h["pchange"] >= 0 else RED
-            ts_v.add("TEXTCOLOR",  (7, i), (7, i), pch_clr)
-            ts_v.add("FONTNAME",   (7, i), (7, i), "Helvetica-Bold")
+            ts_v.add("TEXTCOLOR",  (5, i), (5, i), pch_clr)
+            ts_v.add("FONTNAME",   (5, i), (5, i), "Helvetica-Bold")
         t_v.setStyle(ts_v)
         story.append(t_v)
         story.append(Spacer(1, 6*mm))
