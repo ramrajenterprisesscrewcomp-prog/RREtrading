@@ -6,17 +6,26 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
-_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+def _base() -> str:
+    from config import TELEGRAM_BOT_TOKEN as tok
+    return f"https://api.telegram.org/bot{tok}"
+
+def _chat() -> str:
+    from config import TELEGRAM_CHAT_ID as cid
+    return cid
 
 
 async def send_message(text: str, parse_mode: str = "HTML") -> bool:
     """Send a text message to the configured Telegram chat."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    token = _base()
+    chat  = _chat()
+    if not token or not chat:
         return False
     try:
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(f"{_BASE}/sendMessage", json={
-                "chat_id":                  TELEGRAM_CHAT_ID,
+            r = await c.post(f"{token}/sendMessage", json={
+                "chat_id":                  chat,
                 "text":                     text,
                 "parse_mode":               parse_mode,
                 "disable_web_page_preview": True,
@@ -37,14 +46,16 @@ async def send_document(
     parse_mode: str = "HTML",
 ) -> bool:
     """Send a document (e.g. PDF) to the configured Telegram chat."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    token = _base()
+    chat  = _chat()
+    if not token or not chat:
         return False
     try:
         async with httpx.AsyncClient(timeout=60) as c:
             r = await c.post(
-                f"{_BASE}/sendDocument",
+                f"{token}/sendDocument",
                 data={
-                    "chat_id":    TELEGRAM_CHAT_ID,
+                    "chat_id":    chat,
                     "caption":    caption[:1024],
                     "parse_mode": parse_mode,
                 },

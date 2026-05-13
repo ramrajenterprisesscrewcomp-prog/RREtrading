@@ -618,3 +618,16 @@ async def eod_report_endpoint():
         return {"status": "generating", "message": "EOD report started — PDF will be sent to Telegram"}
     except Exception as exc:
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
+@app.get("/api/test-telegram")
+async def test_telegram():
+    """Test Telegram bot connectivity — use after adding @open_nifty_bot to your group."""
+    from services.telegram_service import send_message
+    from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    ok = await send_message(
+        f"RRE Bot Connected — Pivot alerts are active!\n"
+        f"Bot: {TELEGRAM_BOT_TOKEN[:20]}...\n"
+        f"Chat: {TELEGRAM_CHAT_ID}"
+    )
+    return {"ok": ok, "chat_id": TELEGRAM_CHAT_ID, "token_prefix": TELEGRAM_BOT_TOKEN[:20]}
