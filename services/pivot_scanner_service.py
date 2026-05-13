@@ -14,7 +14,12 @@ Telegram alerts fire once per signal per day.
 """
 import asyncio
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+def _now_ist() -> datetime:
+    return datetime.now(_IST)
 
 import httpx
 from cachetools import TTLCache
@@ -119,7 +124,7 @@ async def scan_pivot_breakouts() -> dict:
     if "r" in _cache:
         return _cache["r"]
 
-    today = date.today()
+    today = _now_ist().date()
     if _alert_date != today:
         _alerted    = set()
         _alert_date = today
@@ -177,13 +182,18 @@ async def scan_pivot_breakouts() -> dict:
         key=lambda x: -x["breakout_pct"],
     )
 
-    # Telegram alerts — first time today only
+    # Telegram alerts — R1 breakout only, before 11:00 AM IST, no duplicates
+    now_ist = _now_ist()
+    alert_window = now_ist.hour < 11
     new_alerts = []
     for h in hits:
-        key = f"{h['symbol']}:{h['signal']}"
+        if h["signal"] != "bullish":
+            continue
+        key = f"{h['symbol']}:r1"
         if key not in _alerted:
             _alerted.add(key)
-            new_alerts.append(h)
+            if alert_window:
+                new_alerts.append(h)
     if new_alerts:
         asyncio.create_task(_send_pivot_alerts(new_alerts))
 
@@ -191,7 +201,7 @@ async def scan_pivot_breakouts() -> dict:
         "bullish":       bullish,
         "bearish":       bearish,
         "total_scanned": len(stocks),
-        "timestamp":     datetime.now().isoformat(),
+        "timestamp":     _now_ist().isoformat(),
     }
     _cache["r"] = result
     logger.info("Pivot scan: %d bullish, %d bearish / %d scanned",
@@ -200,42 +210,22 @@ async def scan_pivot_breakouts() -> dict:
 
 
 async def _send_pivot_alerts(alerts: list[dict]):
-    """Send R1/S1 breakout alerts to Telegram with R2/S2 as next targets."""
+    """Send R1 breakout alerts to Telegram. One alert per symbol per day, before 11 AM only."""
     from services.telegram_service import send_message
 
-    bull = [a for a in alerts if a["signal"] == "bullish"]
-    bear = [a for a in alerts if a["signal"] == "bearish"]
-    now  = datetime.now().strftime("%H:%M IST")
+    now  = _now_ist().strftime("%H:%M IST")
+    lines = [f"📡 <b>R1 Breakout Alert · Nifty 200</b>  <i>{now}</i>", ""]
+    lines.append("🟢 <b>R1 BREAKOUT — Bullish</b>")
 
-    lines = [f"📡 <b>Pivot Breakout Alert · Nifty 200</b>  <i>{now}</i>"]
-
-    if bull:
-        lines.append("")
-        lines.append("🟢 <b>R1 BREAKOUT — Bullish</b>")
-        for a in bull:
-            lines.append(
-                f"  <b>{a['symbol']}</b>   LTP ₹{a['ltp']:,.2f}\n"
-                f"  ✅ R1 Breached: ₹{a['r1']:,.2f}  (+{a['breakout_pct']:.2f}% above R1)\n"
-                f"  🎯 Next Target  R2: ₹{a['r2']:,.2f}\n"
-                f"  📍 Pivot (PP): ₹{a['pp']:,.2f}   S1: ₹{a['s1']:,.2f}"
-            )
-
-    if bear:
-        lines.append("")
-        lines.append("🔴 <b>S1 BREAKDOWN — Bearish</b>")
-        for a in bear:
-            lines.append(
-                f"  <b>{a['symbol']}</b>   LTP ₹{a['ltp']:,.2f}\n"
-                f"  ⚠️ S1 Broken: ₹{a['s1']:,.2f}  (-{a['breakout_pct']:.2f}% below S1)\n"
-                f"  🎯 Next Target  S2: ₹{a['s2']:,.2f}\n"
-                f"  📍 Pivot (PP): ₹{a['pp']:,.2f}   R1: ₹{a['r1']:,.2f}"
-            )
+    for a in alerts:
+        lines.append(
+            f"  <b>{a['symbol']}</b>   LTP ₹{a['ltp']:,.2f}\n"
+            f"  R1 Breached: ₹{a['r1']:,.2f}  (+{a['breakout_pct']:.2f}% above R1)\n"
+            f"  Next Target R2: ₹{a['r2']:,.2f}   PP: ₹{a['pp']:,.2f}"
+        )
 
     lines.append("")
-    lines.append(
-        f"<i>Pivots from previous session OHLC · "
-        f"Alerts fire once per signal per day</i>"
-    )
+    lines.append("<i>One alert per stock per day · Before 11:00 AM only</i>")
 
     try:
         await send_message("\n".join(lines))
