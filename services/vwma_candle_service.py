@@ -323,7 +323,7 @@ async def send_vwma_candle_report() -> None:
         # Telegram caption
         pat_count: dict[str, int] = {}
         for h in hits:
-            for p in h["reversal_pattern"]:
+            for p in h.get("patterns", []):
                 pat_count[p] = pat_count.get(p, 0) + 1
 
         pat_summary = "  |  ".join(
@@ -332,10 +332,10 @@ async def send_vwma_candle_report() -> None:
         top5 = "  ".join(h["symbol"] for h in hits[:5])
 
         caption = (
-            f"<b>VWMA(20) Combo Setup  --  {date_str}</b>\n"
-            f"<i>Doji/Hammer/Pin Bar at VWMA + Bullish Confirmation  --  Daily</i>\n\n"
-            f"TSR universe  --  <b>{len(hits)}</b> stocks matched\n"
-            f"<b>Reversal patterns:</b> {pat_summary}\n\n"
+            f"<b>Pin Bar / Hammer / Doji + Bullish + VWMA(20)  --  {date_str}</b>\n"
+            f"<i>Bullish candle touching VWMA(20) daily  --  Nifty 200</i>\n\n"
+            f"<b>{len(hits)}</b> stocks matched\n"
+            f"<b>Patterns:</b> {pat_summary}\n\n"
             f"<b>Top picks:</b> {top5}"
         )
 
