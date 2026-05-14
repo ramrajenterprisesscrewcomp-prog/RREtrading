@@ -34,7 +34,7 @@ from services.news_service import get_stock_news, get_policy_news, REFERENCE_SIT
 from services.screener_service import scrape_screener
 from services.technical_service import get_technical_data
 from services.global_markets_service import get_global_markets
-from services.openai_service import generate_ai_analysis, generate_market_summary
+
 from services.telegram_service import send_market_summary
 from services.candle_service import candle_alert_loop
 from services.angel_service import get_fno_lot_and_margin_async
@@ -100,14 +100,6 @@ async def _build_overview_data() -> dict:
         _safe(get_sector_rotation(),   "sectors",    []),
     )
 
-    ai_summary = ""
-    try:
-        ai_summary = generate_market_summary(
-            {"indices": indices, "buildup": buildup, "nifty_oi": nifty_oi}
-        )
-    except Exception as exc:
-        errors["ai"] = str(exc)
-
     data = {
         "indices":        indices,
         "gainers":        movers.get("gainers", []),
@@ -117,7 +109,7 @@ async def _build_overview_data() -> dict:
         "sectors":        sectors,
         "market_is_open": mkt_status.get("is_open", False),
         "trade_date":     mkt_status.get("trade_date", ""),
-        "ai_summary":     ai_summary,
+        "ai_summary":     "",
         "errors":         errors,
         "timestamp":      datetime.now().isoformat(),
     }
@@ -472,19 +464,10 @@ async def analyze_stock(symbol: str):
         "data_timestamp":  datetime.now().isoformat(),
     }
 
-    # ── AI Analysis ────────────────────────────────────────────────────────
-    try:
-        ai = generate_ai_analysis(response_data)
-        response_data["ai_summary"]   = ai.get("summary", "")
-        response_data["ai_sentiment"] = ai.get("sentiment", "Neutral")
-        response_data["ai_risks"]     = ai.get("key_risks", [])
-        response_data["ai_catalysts"] = ai.get("key_catalysts", [])
-    except Exception as exc:
-        errors["openai"] = str(exc)
-        response_data["ai_summary"]   = "AI analysis unavailable at this time."
-        response_data["ai_sentiment"] = "Neutral"
-        response_data["ai_risks"]     = []
-        response_data["ai_catalysts"] = []
+    response_data["ai_summary"]   = ""
+    response_data["ai_sentiment"] = "Neutral"
+    response_data["ai_risks"]     = []
+    response_data["ai_catalysts"] = []
 
     _stock_cache[symbol] = response_data
     return JSONResponse(content=response_data)
