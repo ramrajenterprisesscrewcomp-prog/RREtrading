@@ -40,9 +40,10 @@ _NSE_HEADERS = {
 _cache: TTLCache = TTLCache(maxsize=1, ttl=55)    # 55-second result cache
 
 # Alert dedup: fires only when a symbol NEWLY crosses R1 (edge detection)
-_alerted:       set[str]    = set()   # sent today — never re-send
-_alert_date:    date | None = None
-_prev_above_r1: set[str]    = set()   # above R1 in previous scan
+_alerted:          set[str]    = set()   # sent today — never re-send
+_alert_date:       date | None = None
+_prev_above_r1:    set[str]    = set()   # above R1 in previous scan
+_baseline_seeded:  bool        = False   # first scan of day seeds baseline, no alerts
 
 
 def _calc_pivots(ph: float, pl: float, pc: float) -> dict:
@@ -120,16 +121,17 @@ async def scan_pivot_breakouts() -> dict:
     Cached 2 min. New signals trigger Telegram alert once per day per symbol.
     Returns R1/R2/S1/S2 pivot levels for each hit.
     """
-    global _alerted, _alert_date, _prev_above_r1
+    global _alerted, _alert_date, _prev_above_r1, _baseline_seeded
 
     if "r" in _cache:
         return _cache["r"]
 
     today = _now_ist().date()
     if _alert_date != today:
-        _alerted        = set()
-        _alert_date     = today
-        _prev_above_r1  = set()   # fresh edge-detection baseline each day
+        _alerted         = set()
+        _alert_date      = today
+        _prev_above_r1   = set()
+        _baseline_seeded = False   # first scan of new day seeds baseline silently
 
     stocks = await _fetch_nifty200_live()
     if not stocks:
@@ -184,26 +186,33 @@ async def scan_pivot_breakouts() -> dict:
         key=lambda x: -x["breakout_pct"],
     )
 
-    # Edge-detection alerts: only fire when a symbol NEWLY crosses above R1
+    # Edge-detection: alert only when a symbol NEWLY crosses above R1
     now_ist = _now_ist()
     hr, mn  = now_ist.hour, now_ist.minute
     alert_window = (hr == 9 and mn >= 15) or hr == 10
 
     current_above_r1 = {h["symbol"] for h in bullish}
-    newly_crossed    = current_above_r1 - _prev_above_r1   # just crossed this scan
-    _prev_above_r1   = current_above_r1                    # update for next scan
 
-    new_alerts = []
-    if alert_window:
-        for h in bullish:
-            if h["symbol"] not in newly_crossed:
-                continue                                    # was already above R1 — skip
-            key = f"{h['symbol']}:r1"
-            if key not in _alerted:
-                _alerted.add(key)
-                new_alerts.append(h)
-    if new_alerts:
-        asyncio.create_task(_send_pivot_alerts(new_alerts))
+    if not _baseline_seeded:
+        # First scan of the day — seed baseline silently (no alerts)
+        # This prevents a flood of messages for stocks already above R1 at open
+        _prev_above_r1   = current_above_r1
+        _baseline_seeded = True
+    else:
+        newly_crossed  = current_above_r1 - _prev_above_r1   # just crossed this scan
+        _prev_above_r1 = current_above_r1                    # update for next scan
+
+        new_alerts = []
+        if alert_window:
+            for h in bullish:
+                if h["symbol"] not in newly_crossed:
+                    continue
+                key = f"{h['symbol']}:r1"
+                if key not in _alerted:
+                    _alerted.add(key)
+                    new_alerts.append(h)
+        if new_alerts:
+            asyncio.create_task(_send_pivot_alerts(new_alerts))
 
     result = {
         "bullish":       bullish,
@@ -218,13 +227,17 @@ async def scan_pivot_breakouts() -> dict:
 
 
 async def _send_pivot_alerts(alerts: list[dict]):
-    """Send one Telegram message per R1 breakout stock — no batching, one stock = one message."""
+    """Send one Telegram message per R1 breakout. Stops if past 11:00 AM IST."""
     from services.telegram_service import send_message
 
-    now = _now_ist().strftime("%H:%M IST")
     for a in alerts:
+        now_ist = _now_ist()
+        if now_ist.hour >= 11:
+            logger.info("Pivot alert: past 11 AM, stopping send")
+            break
+        now_str = now_ist.strftime("%H:%M IST")
         msg = (
-            f"📡 <b>R1 Breakout · {a['symbol']}</b>  <i>{now}</i>\n\n"
+            f"📡 <b>R1 Breakout · {a['symbol']}</b>  <i>{now_str}</i>\n\n"
             f"🟢 <b>BUY SIGNAL — R1 Breached</b>\n"
             f"LTP: ₹{a['ltp']:,.2f}  (+{a['breakout_pct']:.2f}% above R1)\n"
             f"R1: ₹{a['r1']:,.2f}   Target R2: ₹{a['r2']:,.2f}\n"
