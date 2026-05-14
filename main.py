@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(pm_report_loop())
     from services.eod_report_service import eod_report_loop
     asyncio.create_task(eod_report_loop())
+    from services.pivot_scanner_service import pivot_alert_loop
+    asyncio.create_task(pivot_alert_loop())
     yield
 
 

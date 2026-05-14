@@ -37,9 +37,9 @@ _NSE_HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 
-_cache: TTLCache = TTLCache(maxsize=1, ttl=120)   # 2-minute result cache
+_cache: TTLCache = TTLCache(maxsize=1, ttl=55)    # 55-second result cache
 
-# Alert dedup: "SYMBOL:bullish" / "SYMBOL:bearish", cleared daily
+# Alert dedup: "SYMBOL:r1", cleared daily
 _alerted:    set[str]    = set()
 _alert_date: date | None = None
 
@@ -182,9 +182,10 @@ async def scan_pivot_breakouts() -> dict:
         key=lambda x: -x["breakout_pct"],
     )
 
-    # Telegram alerts — R1 breakout only, before 11:00 AM IST, no duplicates
+    # Telegram alerts — R1 breakout only, 9:15 AM–11:00 AM IST, no duplicates
     now_ist = _now_ist()
-    alert_window = now_ist.hour < 11
+    h, m = now_ist.hour, now_ist.minute
+    alert_window = (h == 9 and m >= 15) or h == 10
     new_alerts = []
     for h in hits:
         if h["signal"] != "bullish":
@@ -210,24 +211,40 @@ async def scan_pivot_breakouts() -> dict:
 
 
 async def _send_pivot_alerts(alerts: list[dict]):
-    """Send R1 breakout alerts to Telegram. One alert per symbol per day, before 11 AM only."""
+    """Send one Telegram message per R1 breakout stock — no batching, one stock = one message."""
     from services.telegram_service import send_message
 
-    now  = _now_ist().strftime("%H:%M IST")
-    lines = [f"📡 <b>R1 Breakout Alert · Nifty 200</b>  <i>{now}</i>", ""]
-    lines.append("🟢 <b>R1 BREAKOUT — Bullish</b>")
-
+    now = _now_ist().strftime("%H:%M IST")
     for a in alerts:
-        lines.append(
-            f"  <b>{a['symbol']}</b>   LTP ₹{a['ltp']:,.2f}\n"
-            f"  R1 Breached: ₹{a['r1']:,.2f}  (+{a['breakout_pct']:.2f}% above R1)\n"
-            f"  Next Target R2: ₹{a['r2']:,.2f}   PP: ₹{a['pp']:,.2f}"
+        msg = (
+            f"📡 <b>R1 Breakout · {a['symbol']}</b>  <i>{now}</i>\n\n"
+            f"🟢 <b>BUY SIGNAL — R1 Breached</b>\n"
+            f"LTP: ₹{a['ltp']:,.2f}  (+{a['breakout_pct']:.2f}% above R1)\n"
+            f"R1: ₹{a['r1']:,.2f}   Target R2: ₹{a['r2']:,.2f}\n"
+            f"PP: ₹{a['pp']:,.2f}   Chg: {a['pchange']:+.2f}%\n\n"
+            f"<i>Nifty 200 · One alert per stock per day</i>"
         )
+        try:
+            await send_message(msg)
+        except Exception as exc:
+            logger.warning("Pivot alert failed [%s]: %s", a["symbol"], exc)
 
-    lines.append("")
-    lines.append("<i>One alert per stock per day · Before 11:00 AM only</i>")
 
-    try:
-        await send_message("\n".join(lines))
-    except Exception as exc:
-        logger.warning("Pivot Telegram alert failed: %s", exc)
+async def pivot_alert_loop() -> None:
+    """Background loop: scan Nifty 200 every 60 s during market hours (9:15–11:00 AM IST, Mon–Fri)."""
+    logger.info("Pivot alert loop started")
+    await asyncio.sleep(30)   # let server fully start
+
+    while True:
+        now = _now_ist()
+        h, m = now.hour, now.minute
+        is_market_day = now.weekday() < 5
+        in_window = is_market_day and ((h == 9 and m >= 15) or h == 10)
+
+        if in_window:
+            try:
+                await scan_pivot_breakouts()
+            except Exception as exc:
+                logger.warning("Pivot alert loop error: %s", exc)
+
+        await asyncio.sleep(60)
