@@ -39,9 +39,10 @@ _NSE_HEADERS = {
 
 _cache: TTLCache = TTLCache(maxsize=1, ttl=55)    # 55-second result cache
 
-# Alert dedup: "SYMBOL:r1", cleared daily
-_alerted:    set[str]    = set()
-_alert_date: date | None = None
+# Alert dedup: fires only when a symbol NEWLY crosses R1 (edge detection)
+_alerted:       set[str]    = set()   # sent today — never re-send
+_alert_date:    date | None = None
+_prev_above_r1: set[str]    = set()   # above R1 in previous scan
 
 
 def _calc_pivots(ph: float, pl: float, pc: float) -> dict:
@@ -126,8 +127,9 @@ async def scan_pivot_breakouts() -> dict:
 
     today = _now_ist().date()
     if _alert_date != today:
-        _alerted    = set()
-        _alert_date = today
+        _alerted        = set()
+        _alert_date     = today
+        _prev_above_r1  = set()   # fresh edge-detection baseline each day
 
     stocks = await _fetch_nifty200_live()
     if not stocks:
@@ -182,18 +184,24 @@ async def scan_pivot_breakouts() -> dict:
         key=lambda x: -x["breakout_pct"],
     )
 
-    # Telegram alerts — R1 breakout only, 9:15 AM–11:00 AM IST, no duplicates
+    # Edge-detection alerts: only fire when a symbol NEWLY crosses above R1
+    global _prev_above_r1
     now_ist = _now_ist()
-    h, m = now_ist.hour, now_ist.minute
-    alert_window = (h == 9 and m >= 15) or h == 10
+    hr, mn  = now_ist.hour, now_ist.minute
+    alert_window = (hr == 9 and mn >= 15) or hr == 10
+
+    current_above_r1 = {h["symbol"] for h in bullish}
+    newly_crossed    = current_above_r1 - _prev_above_r1   # just crossed this scan
+    _prev_above_r1   = current_above_r1                    # update for next scan
+
     new_alerts = []
-    for h in hits:
-        if h["signal"] != "bullish":
-            continue
-        key = f"{h['symbol']}:r1"
-        if key not in _alerted:
-            _alerted.add(key)
-            if alert_window:
+    if alert_window:
+        for h in bullish:
+            if h["symbol"] not in newly_crossed:
+                continue                                    # was already above R1 — skip
+            key = f"{h['symbol']}:r1"
+            if key not in _alerted:
+                _alerted.add(key)
                 new_alerts.append(h)
     if new_alerts:
         asyncio.create_task(_send_pivot_alerts(new_alerts))
