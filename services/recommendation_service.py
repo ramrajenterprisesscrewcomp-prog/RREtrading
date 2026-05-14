@@ -580,7 +580,7 @@ For AVOID, give specific quantified reasons tied to today's data."""
 
     try:
         resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.2,

@@ -1,12 +1,16 @@
 import json
 import logging
 from openai import OpenAI
+from cachetools import TTLCache
 from config import OPENAI_API_KEY
 
 logger = logging.getLogger(__name__)
 
 _client: OpenAI | None = None
 _client_key: str = ""
+
+# Cache market summary for 10 minutes — avoids re-calling gpt-4o-mini every 5s
+_summary_cache: TTLCache = TTLCache(maxsize=1, ttl=600)
 
 
 def _get_client() -> OpenAI:
@@ -31,9 +35,11 @@ def _fmt_technical(tech: dict | None) -> str:
 
 def generate_market_summary(overview: dict) -> str:
     """
-    2-3 sentence market mood summary from OI buildup distribution + index moves.
-    Falls back to a rule-based summary if OpenAI is unavailable.
+    2-3 sentence market mood summary. Cached 10 minutes to avoid per-SSE-tick API calls.
     """
+    if "s" in _summary_cache:
+        return _summary_cache["s"]
+
     buildup   = overview.get("buildup", {})
     indices   = overview.get("indices", {})
     nifty_oi  = overview.get("nifty_oi", {})
@@ -67,12 +73,14 @@ def generate_market_summary(overview: dict) -> str:
     )
     try:
         resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
             temperature=0.35,
         )
-        return resp.choices[0].message.content.strip()
+        result = resp.choices[0].message.content.strip()
+        _summary_cache["s"] = result
+        return result
     except Exception as exc:
         logger.warning("Market AI summary failed: %s", exc)
         trend = "Bullish" if lb > sb else "Bearish" if sb > lb else "Mixed"
@@ -98,7 +106,7 @@ def generate_policy_alert_analysis(title: str, description: str = "") -> str:
     )
     try:
         resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.3,
@@ -170,7 +178,7 @@ Based on the above data, provide your analysis in the following JSON format ONLY
 
     try:
         response = _get_client().chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.3,
@@ -209,7 +217,7 @@ def generate_news_impact_analysis(category: str, title: str, details: str = "") 
     )
     try:
         resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.3,
