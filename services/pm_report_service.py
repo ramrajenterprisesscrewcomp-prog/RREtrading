@@ -704,14 +704,16 @@ async def pm_scan_and_send() -> None:
 
 async def pm_report_loop() -> None:
     """Background loop: fires once at 14:45 IST on every market day (Mon–Fri)."""
+    from datetime import timezone, timedelta
+    _IST = timezone(timedelta(hours=5, minutes=30))
     logger.info("PM report loop started")
     fired_today: str = ""
     await asyncio.sleep(30)
 
     while True:
-        now = datetime.now()
+        now = datetime.now(_IST)
         today_key = now.strftime("%Y-%m-%d")
-        if (now.weekday() < 5               # Mon–Fri only
+        if (now.weekday() < 5
                 and now.hour == 14
                 and now.minute >= 45
                 and now.minute < 55
