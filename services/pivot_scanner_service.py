@@ -120,7 +120,7 @@ async def scan_pivot_breakouts() -> dict:
     Cached 2 min. New signals trigger Telegram alert once per day per symbol.
     Returns R1/R2/S1/S2 pivot levels for each hit.
     """
-    global _alerted, _alert_date
+    global _alerted, _alert_date, _prev_above_r1
 
     if "r" in _cache:
         return _cache["r"]
@@ -185,7 +185,6 @@ async def scan_pivot_breakouts() -> dict:
     )
 
     # Edge-detection alerts: only fire when a symbol NEWLY crosses above R1
-    global _prev_above_r1
     now_ist = _now_ist()
     hr, mn  = now_ist.hour, now_ist.minute
     alert_window = (hr == 9 and mn >= 15) or hr == 10
