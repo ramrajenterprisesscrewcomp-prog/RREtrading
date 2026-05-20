@@ -215,6 +215,11 @@
       class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity whitespace-nowrap">
       🌍 Global
     </button>
+    <a href="#portfolio"
+      style="background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.4);color:#818cf8;"
+      class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity whitespace-nowrap">
+      📊 Portfolio
+    </a>
     <a href="/analyze"
       style="background:#10b981;color:#fff;"
       class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity whitespace-nowrap">
@@ -1357,6 +1362,174 @@ setInterval(() => loadPivotSignals(true), 120000);   // refresh pivot scan every
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && globalOpen) toggleGlobal();
 });
+
+// ── Portfolio ──────────────────────────────────────────────────────────────
+let _pfData = [];
+
+async function loadPortfolio() {
+  try {
+    const r = await fetch('/api/portfolio');
+    const d = await r.json();
+    _pfData = d.holdings || [];
+    renderPortfolio(d);
+  } catch(e) {
+    $('pfBody').innerHTML = '<tr><td colspan="8" class="text-center text-gray-600 py-3 text-xs">Failed to load portfolio</td></tr>';
+  }
+}
+
+function renderPortfolio(d) {
+  const holdings = d.holdings || [];
+  const inv = d.total_invested || 0;
+  const cur = d.total_current  || 0;
+  const pnl = d.total_pnl      || 0;
+  const pct = d.total_pnl_pct  || 0;
+
+  // Summary bar
+  $('pfSummary').innerHTML = holdings.length === 0 ? '' : `
+    <div class="flex flex-wrap gap-4 text-xs mb-2">
+      <span class="text-gray-500">Invested: <span class="text-gray-200 font-bold">₹${fmtNum(inv)}</span></span>
+      <span class="text-gray-500">Current: <span class="text-gray-200 font-bold">₹${fmtNum(cur)}</span></span>
+      <span class="text-gray-500">P&L:
+        <span class="font-bold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+          ${pnl >= 0 ? '+' : ''}₹${fmtNum(pnl)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)
+        </span>
+      </span>
+    </div>`;
+
+  if (!holdings.length) {
+    $('pfBody').innerHTML = '<tr><td colspan="8" class="text-center text-gray-600 py-4 text-xs">No holdings yet — add your first stock below</td></tr>';
+    return;
+  }
+  $('pfBody').innerHTML = holdings.map((h, i) => {
+    const pnlClr = (h.pnl || 0) >= 0 ? '#10b981' : '#ef4444';
+    const ltp    = h.ltp > 0 ? `₹${h.ltp.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
+    const pnlStr = h.ltp > 0 ? `${(h.pnl||0)>=0?'+':''}₹${fmtNum(h.pnl||0)}` : '—';
+    const pctStr = h.ltp > 0 ? `${(h.pnl_pct||0)>=0?'+':''}${(h.pnl_pct||0).toFixed(1)}%` : '—';
+    return `<tr class="border-b border-gray-800 hover:bg-gray-800/30 text-xs">
+      <td class="py-2 pl-3 text-gray-400">${i+1}</td>
+      <td class="py-2 font-bold text-indigo-300">${h.symbol}</td>
+      <td class="py-2 text-right text-gray-300">${h.qty}</td>
+      <td class="py-2 text-right text-gray-400">₹${(h.avg_price||0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+      <td class="py-2 text-right text-gray-200 font-semibold">${ltp}</td>
+      <td class="py-2 text-right font-bold" style="color:${pnlClr}">${pnlStr}</td>
+      <td class="py-2 text-right font-bold" style="color:${pnlClr}">${pctStr}</td>
+      <td class="py-2 pr-3 text-center">
+        <button onclick="removeHolding('${h.symbol}')"
+          class="text-red-500 hover:text-red-400 text-xs font-bold px-2 py-0.5 rounded border border-red-800 hover:border-red-600 transition-colors">
+          ✕
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function fmtNum(n) {
+  return Math.abs(n) >= 1e7 ? (n/1e7).toFixed(2)+'Cr'
+       : Math.abs(n) >= 1e5 ? (n/1e5).toFixed(2)+'L'
+       : n.toLocaleString('en-IN', {maximumFractionDigits:0});
+}
+
+async function addHolding() {
+  const sym = $('pfSym').value.trim().toUpperCase();
+  const qty = parseFloat($('pfQty').value);
+  const avg = parseFloat($('pfAvg').value);
+  if (!sym || !qty || !avg) { alert('Fill all fields'); return; }
+  const btn = $('pfAddBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/portfolio', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({symbol: sym, qty, avg_price: avg}),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    $('pfSym').value = ''; $('pfQty').value = ''; $('pfAvg').value = '';
+    await loadPortfolio();
+  } catch(e) { alert('Error: ' + e.message); }
+  btn.disabled = false; btn.textContent = 'Add / Update';
+}
+
+async function removeHolding(sym) {
+  if (!confirm(`Remove ${sym} from portfolio?`)) return;
+  await fetch(`/api/portfolio/${sym}`, {method:'DELETE'});
+  await loadPortfolio();
+}
+
+loadPortfolio();
+setInterval(loadPortfolio, 60000); // refresh P&L every 60s
 </script>
+
+<!-- ═══════════════════════ MY PORTFOLIO SECTION ═══════════════════════════ -->
+<div id="portfolio" class="max-w-screen-2xl mx-auto px-3 pb-6 mt-1">
+  <div class="card p-4">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <span style="color:#818cf8;" class="text-base">📊</span>
+        <span class="font-bold text-sm text-gray-200">My Portfolio</span>
+        <span class="text-xs text-gray-600">Live P&amp;L · included in EOD report AI analysis</span>
+      </div>
+      <button onclick="loadPortfolio()"
+        style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#818cf8;"
+        class="text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-80 transition-opacity">
+        ↻ Refresh
+      </button>
+    </div>
+
+    <!-- P&L Summary -->
+    <div id="pfSummary"></div>
+
+    <!-- Holdings table -->
+    <div class="tbl-scroll mb-4">
+      <table class="w-full" style="min-width:520px;">
+        <thead>
+          <tr class="border-b border-gray-800 text-gray-500" style="font-size:0.62rem;text-transform:uppercase;letter-spacing:.06em;">
+            <th class="py-1.5 pl-3 text-left font-semibold">#</th>
+            <th class="py-1.5 text-left font-semibold">Symbol</th>
+            <th class="py-1.5 text-right font-semibold">Qty</th>
+            <th class="py-1.5 text-right font-semibold">Avg Cost</th>
+            <th class="py-1.5 text-right font-semibold">LTP</th>
+            <th class="py-1.5 text-right font-semibold">P&amp;L</th>
+            <th class="py-1.5 text-right font-semibold">P&amp;L %</th>
+            <th class="py-1.5 pr-3 text-center font-semibold">Del</th>
+          </tr>
+        </thead>
+        <tbody id="pfBody">
+          <tr><td colspan="8" class="text-center text-gray-600 py-4 text-xs">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Add form -->
+    <div class="border-t border-gray-800 pt-3">
+      <div class="text-xs text-gray-600 mb-2 font-semibold uppercase tracking-wide">Add / Update Holding</div>
+      <div class="flex flex-wrap gap-2 items-end">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-gray-600">Symbol</label>
+          <input id="pfSym" type="text" placeholder="e.g. RELIANCE"
+            class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 w-28 uppercase focus:outline-none focus:border-indigo-500"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-gray-600">Quantity</label>
+          <input id="pfQty" type="number" placeholder="10" min="0" step="1"
+            class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 w-20 focus:outline-none focus:border-indigo-500">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-gray-600">Avg Price (₹)</label>
+          <input id="pfAvg" type="number" placeholder="2500.00" min="0" step="0.01"
+            class="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 w-28 focus:outline-none focus:border-indigo-500">
+        </div>
+        <button id="pfAddBtn" onclick="addHolding()"
+          style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.5);color:#818cf8;"
+          class="text-xs font-bold px-4 py-1.5 rounded-lg hover:opacity-80 transition-opacity h-fit">
+          Add / Update
+        </button>
+        <span class="text-xs text-gray-600 self-center">Enter the same symbol again to update qty &amp; avg price</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

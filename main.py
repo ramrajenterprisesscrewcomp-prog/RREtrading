@@ -594,6 +594,17 @@ async def pivot_signals_endpoint(force: bool = False):
 
 
 
+@app.post("/api/pre-market-report")
+async def pre_market_report_endpoint():
+    """Manually trigger the 9:30 AM pre-market report — builds PDF and sends to Telegram."""
+    try:
+        from services.pre_market_service import pre_market_scan_and_send
+        asyncio.create_task(pre_market_scan_and_send())
+        return {"status": "generating", "message": "Pre-Market report started — PDF will be sent to Telegram"}
+    except Exception as exc:
+        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
 @app.post("/api/eod-report")
 async def eod_report_endpoint():
     """Trigger the 4:00 PM End-of-Day report — builds PDF and sends to Telegram."""
@@ -625,6 +636,52 @@ async def vwma_candle_report_endpoint():
         return {"status": "generating", "message": "Reversal+Engulfing report started — PDF will be sent to Telegram"}
     except Exception as exc:
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
+# ── Portfolio endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/portfolio")
+async def portfolio_get():
+    """List all portfolio holdings with live LTP and P&L."""
+    from services.portfolio_service import get_portfolio_with_ltp
+    holdings = await get_portfolio_with_ltp()
+    total_invested = sum(h.get("invested", 0) for h in holdings)
+    total_current  = sum(h.get("current",  0) for h in holdings if h.get("ltp", 0) > 0)
+    total_pnl      = round(total_current - total_invested, 2) if total_current else 0
+    total_pnl_pct  = round(total_pnl / total_invested * 100, 2) if total_invested else 0
+    return JSONResponse(content={
+        "holdings":       holdings,
+        "total_invested": round(total_invested, 2),
+        "total_current":  round(total_current,  2),
+        "total_pnl":      total_pnl,
+        "total_pnl_pct":  total_pnl_pct,
+    })
+
+
+@app.post("/api/portfolio")
+async def portfolio_add(request: Request):
+    """Add or update a holding. Body: {symbol, qty, avg_price}"""
+    body = await request.json()
+    symbol    = str(body.get("symbol", "")).upper().strip()
+    qty       = float(body.get("qty", 0))
+    avg_price = float(body.get("avg_price", 0))
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol required")
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="qty must be > 0")
+    if avg_price <= 0:
+        raise HTTPException(status_code=400, detail="avg_price must be > 0")
+    from services.portfolio_service import add_or_update_holding
+    holdings = add_or_update_holding(symbol, qty, avg_price)
+    return JSONResponse(content={"status": "saved", "count": len(holdings)})
+
+
+@app.delete("/api/portfolio/{symbol}")
+async def portfolio_remove(symbol: str):
+    """Remove a holding by symbol."""
+    from services.portfolio_service import remove_holding
+    holdings = remove_holding(symbol)
+    return JSONResponse(content={"status": "removed", "count": len(holdings)})
 
 
 @app.get("/api/test-telegram")

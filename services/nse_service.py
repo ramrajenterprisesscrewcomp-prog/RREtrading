@@ -614,10 +614,15 @@ def _compute_oi_opinion(strikes: list, underlying: float) -> dict:
     total_ce = sum(s["ce_oi"] for s in strikes)
     total_pe = sum(s["pe_oi"] for s in strikes)
     pcr = round(total_pe / max(total_ce, 1), 2)
-    max_ce = max(strikes, key=lambda x: x["ce_oi"])
-    max_pe = max(strikes, key=lambda x: x["pe_oi"])
     ce_chg = sum(s["ce_chg"] for s in strikes)
     pe_chg = sum(s["pe_chg"] for s in strikes)
+
+    # Resistance = highest CE OI from strikes AT or ABOVE current price (call wall overhead)
+    # Support    = highest PE OI from strikes AT or BELOW current price (put floor beneath)
+    above = [s for s in strikes if s["strike"] >= underlying] or strikes
+    below = [s for s in strikes if s["strike"] <= underlying] or strikes
+    max_ce = max(above, key=lambda x: x["ce_oi"])
+    max_pe = max(below, key=lambda x: x["pe_oi"])
 
     if pcr > 1.3:
         sentiment = "Bullish"
@@ -630,13 +635,15 @@ def _compute_oi_opinion(strikes: list, underlying: float) -> dict:
     else:
         sentiment = "Neutral"
 
+    has_chg = ce_chg != 0 or pe_chg != 0
     writer_bias = (
-        "Put writers active (bullish)" if pe_chg > ce_chg > 0
-        else "Call writers active (bearish)" if ce_chg > pe_chg > 0
+        "Put writers active — bullish" if (has_chg and pe_chg > ce_chg > 0)
+        else "Call writers active — bearish" if (has_chg and ce_chg > pe_chg > 0)
+        else "EOD data — intraday changes unavailable" if not has_chg
         else "Mixed writer activity"
     )
 
-    # Fresh buildup = strike with highest positive OI change today (new positions)
+    # Fresh buildup = strike with highest positive OI change (new positions opened today)
     fresh_ce = max(strikes, key=lambda x: x["ce_chg"])
     fresh_pe = max(strikes, key=lambda x: x["pe_chg"])
 
@@ -648,6 +655,7 @@ def _compute_oi_opinion(strikes: list, underlying: float) -> dict:
         "writer_bias":      writer_bias,
         "total_ce_oi":      total_ce,
         "total_pe_oi":      total_pe,
+        "has_oi_change":    has_chg,
         "fresh_resistance": fresh_ce["strike"] if fresh_ce["ce_chg"] > 0 else None,
         "fresh_support":    fresh_pe["strike"] if fresh_pe["pe_chg"] > 0 else None,
         "fresh_ce_chg":     fresh_ce["ce_chg"] if fresh_ce["ce_chg"] > 0 else 0,
@@ -992,3 +1000,25 @@ async def get_nifty500_ohlc() -> list[dict]:
     except Exception as exc:
         logger.warning("Nifty 500 OHLC fetch failed: %s", exc)
         return []
+
+
+async def get_live_ltp(symbol: str) -> float:
+    """Fetch the freshest LTP for a single stock from NSE quote-equity endpoint."""
+    try:
+        data = await _nse_get(f"/api/quote-equity?symbol={symbol.upper()}")
+        price = (
+            data.get("priceInfo", {}).get("lastPrice")
+            or data.get("priceInfo", {}).get("close")
+            or data.get("lastPrice")
+            or 0
+        )
+        return float(str(price).replace(",", "") or 0)
+    except Exception as exc:
+        logger.debug("Live LTP fetch failed for %s: %s", symbol, exc)
+        return 0.0
+
+
+async def get_live_ltps(symbols: list[str]) -> dict[str, float]:
+    """Fetch live LTPs for multiple symbols in parallel. Returns {symbol: ltp}."""
+    results = await asyncio.gather(*[get_live_ltp(s) for s in symbols])
+    return {sym: ltp for sym, ltp in zip(symbols, results) if ltp > 0}

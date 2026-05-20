@@ -219,13 +219,14 @@ def _fallback_picks(lb, bo, pb, runners) -> str:
 # ── PDF Builder ───────────────────────────────────────────────────────────────
 
 def _build_pm_pdf(
-    date_str:     str,
-    long_buildup: list[dict],
-    breakouts:    list[dict],
-    pullbacks:    list[dict],
-    runners:      list[dict],
-    ai_text:      str,
-    vwma_hits:    list[dict] | None = None,
+    date_str:       str,
+    long_buildup:   list[dict],
+    breakouts:      list[dict],
+    pullbacks:      list[dict],
+    runners:        list[dict],
+    ai_text:        str,
+    vwma_hits:      list[dict] | None = None,
+    retrace_hits:   list[dict] | None = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -281,7 +282,8 @@ def _build_pm_pdf(
         f"F&O Long Buildup: <b>{len(long_buildup)}</b>  ·  "
         f"Consolidation Breakouts: <b>{len(breakouts)}</b>  ·  "
         f"Pullback Setups: <b>{len(pullbacks)}</b>  ·  "
-        f"Runner Candidates: <b>{len(runners)}</b>",
+        f"Runner Candidates: <b>{len(runners)}</b>  ·  "
+        f"VWMA Retraces Live: <b>{len(retrace_hits or [])}</b>",
         sty("SUM", size=8, color=DARK_BLUE, align=TA_CENTER, after=2),
     ))
     story.append(Spacer(1, 5*mm))
@@ -529,7 +531,74 @@ def _build_pm_pdf(
         story.append(t_v)
         story.append(Spacer(1, 6*mm))
 
-    # ── 6. AI Analysis & Top Picks ────────────────────────────────────────────
+    # ── 6. VWMA Retraces Live (5-min intraday) ───────────────────────────────
+    TEAL2 = colors.HexColor("#0891b2")
+    _section_header(
+        f"VWMA(20) Retraces Live  ({len(retrace_hits or [])} stocks)  --  Daily Timeframe",
+        "Today's daily candle low touched VWMA(20) · Prev days closed above VWMA · Hammer / Dragonfly Doji / Engulfing / Pin Bar · Lower wick > body",
+        TEAL2,
+    )
+    if not retrace_hits:
+        story.append(Paragraph(
+            "No VWMA retrace setups found at scan time. "
+            "All 4 conditions must be true simultaneously: retrace to VWMA, support, reversal candle, lower wick > body.",
+            sty("RT_NONE", size=8, color=GRAY, italic=True, before=2, after=4),
+        ))
+    else:
+        PAT_CLR = {
+            "Hammer":            GREEN,
+            "Dragonfly Doji":    GREEN,
+            "Pin Bar":           GREEN,
+            "Bullish Engulfing": colors.HexColor("#065f46"),
+        }
+        r_hdr  = ["#", "Symbol", "Pattern", "LTP", "VWMA(20)", "Touch%", "Body%", "Wick%"]
+        cw_r   = [7*mm, 25*mm, 42*mm, 20*mm, 20*mm, 18*mm, 15*mm, 13*mm]
+        r_rows = [r_hdr]
+        for i, h in enumerate(retrace_hits[:25], 1):
+            r_rows.append([
+                str(i),
+                h["symbol"],
+                " | ".join(h["patterns"]),
+                f"{h['ltp']:,.2f}",
+                f"{h['vwma']:,.2f}",
+                f"{h['touch_pct']:.2f}%",
+                f"{h['body_pct']:.0f}%",
+                f"{h['wick_pct']:.0f}%",
+            ])
+        t_r = Table(r_rows, colWidths=cw_r)
+        ts_r_style = TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), TEAL2),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, 0), 7.5),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("ALIGN",         (1, 1), (2, -1), "LEFT"),
+            ("FONTSIZE",      (0, 1), (-1, -1), 7),
+            ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
+            ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ])
+        for i, h in enumerate(retrace_hits[:25], 1):
+            ts_r_style.add("BACKGROUND", (0, i), (-1, i), ALT_ROW if i % 2 == 0 else colors.white)
+            first_pat = h["patterns"][0] if h["patterns"] else ""
+            clr = PAT_CLR.get(first_pat, GREEN)
+            ts_r_style.add("TEXTCOLOR", (2, i), (2, i), clr)
+            ts_r_style.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
+            ts_r_style.add("TEXTCOLOR", (7, i), (7, i), GREEN)
+            ts_r_style.add("FONTNAME",  (7, i), (7, i), "Helvetica-Bold")
+        t_r.setStyle(ts_r_style)
+        story.append(t_r)
+        story.append(Spacer(1, 3*mm))
+        story.append(Paragraph(
+            "Entry: Buy on close above current candle high  |  "
+            "Stop: Below current candle low (VWMA breakdown)  |  "
+            "Target: Previous swing high  |  Touch% = how far low penetrated below VWMA",
+            sty("RT_RULE", size=7, color=TEAL2, align=TA_CENTER, italic=True),
+        ))
+    story.append(Spacer(1, 6*mm))
+
+    # ── 7. AI Analysis & Top Picks ────────────────────────────────────────────
     if ai_text:
         _section_header(
             "🤖 AI Analysis & Trend Continuation Picks",
@@ -600,6 +669,7 @@ async def pm_scan_and_send() -> None:
 
     try:
         from services.vwma_candle_service import scan_vwma_candle
+        from services.vwma_retrace_service import scan_vwma_retraces
 
         # Fast parallel fetches — TSR reads from in-memory cache (non-blocking)
         stocks, buildup_raw, tsr_bu = await asyncio.gather(
@@ -608,13 +678,28 @@ async def pm_scan_and_send() -> None:
             get_tsr_buildup(),
         )
 
-        # VWMA scan — isolated so a failure never blocks the main report
-        vwma_hits = []
+        # VWMA daily reversal scan + live retrace scan — both isolated
+        vwma_hits    = []
+        retrace_hits = []
         try:
             vwma_hits = await scan_vwma_candle()
-            logger.info("PM VWMA scan: %d hits", len(vwma_hits))
+            logger.info("PM VWMA daily scan: %d hits", len(vwma_hits))
         except Exception as e:
-            logger.warning("PM VWMA scan failed: %s", e)
+            logger.warning("PM VWMA daily scan failed: %s", e)
+        try:
+            retrace_hits = await scan_vwma_retraces(stocks or [])
+            logger.info("PM VWMA daily retrace scan: %d hits", len(retrace_hits))
+            # Refresh LTP for retrace hits — stock prices may have moved since the
+            # batch fetch at report start
+            if retrace_hits:
+                from services.nse_service import get_live_ltps
+                live_ltps = await get_live_ltps([h["symbol"] for h in retrace_hits])
+                for h in retrace_hits:
+                    fresh = live_ltps.get(h["symbol"], 0)
+                    if fresh > 0:
+                        h["ltp"] = round(fresh, 2)
+        except Exception as e:
+            logger.warning("PM VWMA retrace scan failed: %s", e)
 
         # ── Merge NSE FNO + TSR Pro long buildup with source tags ────────────
         nse_lb = (buildup_raw or {}).get("Long Buildup", [])
@@ -657,7 +742,7 @@ async def pm_scan_and_send() -> None:
         # Build PDF in thread
         pdf_bytes = await asyncio.to_thread(
             _build_pm_pdf, date_str, long_buildup, breakouts, pullbacks, runners, ai_text,
-            vwma_hits or [],
+            vwma_hits or [], retrace_hits or [],
         )
 
         # Telegram caption
@@ -682,7 +767,12 @@ async def pm_scan_and_send() -> None:
             caption_lines.append(f"  ⭐⭐⭐ HIGH: {' · '.join(high_r)}")
         if str_r:
             caption_lines.append(f"  ⭐⭐ STRONG: {' · '.join(str_r)}")
-        caption_lines.append("\n🤖 AI analysis &amp; trend picks included in PDF")
+        rt_line = (
+            f"VWMA(20) Retraces Live: {len(retrace_hits)} stocks"
+            + (f"  --  {' . '.join(r['symbol'] for r in retrace_hits[:5])}" if retrace_hits else "  --  no setups at scan time")
+        )
+        caption_lines.append(f"\n{rt_line}")
+        caption_lines.append("AI analysis &amp; trend picks included in PDF")
 
         filename = f"RRE_PM_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
         await send_document(pdf_bytes, filename, "\n".join(caption_lines))

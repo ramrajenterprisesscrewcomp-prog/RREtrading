@@ -20,6 +20,14 @@ build/
 # Claude project memory (local only)
 .claude/
 
+# Runtime data (portfolio, OI cache, prev runners)
+data/
+.oi_last_session.json
+
+# Logs
+logs/
+*.log
+
 # OS files
 Thumbs.db
 .DS_Store
