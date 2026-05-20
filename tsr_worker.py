@@ -58,7 +58,11 @@ def _is_login(url):
 
 
 async def main(email, password):
-    from playwright.async_api import async_playwright
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        print(json.dumps({}))
+        return
 
     result = {"buildup": {}, "pcr": [], "signals": [], "weekly_support": [], "monthly_support": []}
 
