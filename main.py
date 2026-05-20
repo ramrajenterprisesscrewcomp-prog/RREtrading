@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from cachetools import TTLCache
 
 from config import CACHE_TTL_STOCK, CACHE_TTL_SCREENER, CACHE_TTL_NEWS
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RRE Stock Analysis Dashboard", version="1.0.0", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 _stock_cache:    TTLCache = TTLCache(maxsize=50,  ttl=CACHE_TTL_STOCK)
 _screener_cache: TTLCache = TTLCache(maxsize=50,  ttl=CACHE_TTL_SCREENER)
@@ -592,6 +594,13 @@ async def pivot_signals_endpoint(force: bool = False):
             "error": str(exc), "timestamp": datetime.now().isoformat(),
         })
 
+
+
+@app.get("/api/ai-cost")
+async def ai_cost_endpoint():
+    """Today's estimated OpenAI spend and remaining daily budget."""
+    from services.openai_service import get_daily_ai_cost
+    return JSONResponse(content=get_daily_ai_cost())
 
 
 @app.post("/api/pre-market-report")
