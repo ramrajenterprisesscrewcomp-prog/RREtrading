@@ -948,7 +948,7 @@ async function loadGlobal() {
     const data = await r.json();
     renderGlobal(data);
     globalLoaded = true;
-    $('globalTs').textContent = new Date().toLocaleTimeString('en-IN');
+    $('globalTs').textContent = new Date().toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata'}) + ' IST';
   } catch(e) {
     $('globalContent').innerHTML = `<p class="text-red-400 text-xs text-center py-8">Failed: ${e.message}</p>`;
   }
@@ -1039,7 +1039,7 @@ function renderOverview(d) {
     if (_activeSectorTab === '1d') renderSectorChips(_sectorMultiData, 'pchange_1d');
   }
 
-  $('lastUpdate').textContent = `Updated ${new Date(d.timestamp).toLocaleTimeString('en-IN')}`;
+  $('lastUpdate').textContent = `Updated ${new Date(d.timestamp).toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata'})} IST`;
   if (globalOpen) loadGlobal(); else globalLoaded = false;
   if (firstLoad) firstLoad = false;
 }
@@ -1345,8 +1345,8 @@ async function loadPivotSignals(force = false) {
 
     $('pivotScanCount').textContent = tot ? `${tot} stocks scanned` : '';
     if (d.timestamp) {
-      const ts = new Date(d.timestamp).toLocaleTimeString('en-IN');
-      $('pivotMeta').textContent = `Updated ${ts} · Pivots from previous session OHLC`;
+      const ts = new Date(d.timestamp).toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata'});
+      $('pivotMeta').textContent = `Updated ${ts} IST · Pivots from previous session OHLC`;
     }
 
     $('pivotBullish').innerHTML = bull.length
