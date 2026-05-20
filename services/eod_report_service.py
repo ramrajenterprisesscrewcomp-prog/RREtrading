@@ -160,8 +160,8 @@ def _generate_gainer_analysis(gainers: list[dict]) -> dict:
     if not gainers:
         return {"reasons": {}, "early_signal_insight": ""}
     try:
-        from services.openai_service import _get_client, _is_ai_hours
-        if not _is_ai_hours():
+        from services.openai_service import _get_client, _is_ai_hours, _under_limit, _record_cost
+        if not _is_ai_hours() or not _under_limit():
             return {"reasons": {}, "early_signal_insight": ""}
 
         lines = []
@@ -196,6 +196,7 @@ def _generate_gainer_analysis(gainers: list[dict]) -> dict:
             temperature=0.3,
             response_format={"type": "json_object"},
         )
+        _record_cost(resp.usage)
         import json
         data = json.loads(resp.choices[0].message.content)
         return {
@@ -225,8 +226,8 @@ def _generate_nifty_intelligence(
     if not nifty:
         return empty
     try:
-        from services.openai_service import _get_client, _is_ai_hours
-        if not _is_ai_hours():
+        from services.openai_service import _get_client, _is_ai_hours, _under_limit, _record_cost
+        if not _is_ai_hours() or not _under_limit():
             return empty
 
         def _f(d, k, default=0):
@@ -288,6 +289,7 @@ def _generate_nifty_intelligence(
             temperature=0.3,
             response_format={"type": "json_object"},
         )
+        _record_cost(resp.usage)
         import json as _json
         return _json.loads(resp.choices[0].message.content)
     except Exception as exc:
@@ -306,7 +308,9 @@ def _generate_eod_ai(
     sector_data:  dict,
 ) -> str:
     try:
-        from services.openai_service import _get_client
+        from services.openai_service import _get_client, _under_limit, _record_cost
+        if not _under_limit():
+            return ""
 
         g_syms  = [s.get("symbol","") for s in gainers[:8]]
         l_syms  = [s.get("symbol","") for s in losers[:8]]
@@ -344,6 +348,7 @@ def _generate_eod_ai(
             max_tokens=700,
             temperature=0.35,
         )
+        _record_cost(resp.usage)
         return resp.choices[0].message.content.strip()
 
     except Exception as exc:
@@ -583,6 +588,7 @@ def _build_eod_pdf(
     story.append(Spacer(1, 3*mm))
 
     # ── Row 3: Top CE/PE strikes table ────────────────────────────────────
+    underlying = n_c  # Nifty spot price for Support/Resistance classification
     strikes = weekly_strikes or []
     if strikes:
         top_s = sorted(strikes, key=lambda x: x.get("ce_oi", 0) + x.get("pe_oi", 0), reverse=True)[:8]
