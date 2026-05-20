@@ -141,7 +141,9 @@ def _generate_weekly_ai(week_dates, runner_stats, r1_stats,
         return {"commentary": "", "loser_insights": {}}
 
 
-def _build_weekly_pdf(week_dates, runner_by_day, runner_stats,
+def _build_weekly_pdf(week_dates, runner_by_day,
+                      pm_stats, eod_stats,
+                      pm_runners_by_day, eod_runners_by_day,
                       r1_alerts, r1_summary,
                       top_losers, nifty_weekly_pct,
                       ai_result) -> bytes:
@@ -216,79 +218,68 @@ def _build_weekly_pdf(week_dates, runner_by_day, runner_stats,
     story.append(hr())
 
     # ── Runner Win Rate ────────────────────────────────────────────────────────
-    story.append(pg("Tomorrow's Runner — Weekly Win Rate", size=10, bold=True, color=YELLOW))
-    story.append(Spacer(1, 2*mm))
+    def _runner_section(label, stats, runner_by_day_src, color_hex):
+        story.append(pg(f"Tomorrow's Runner Candidates — {label}", size=10, bold=True,
+                        color=colors.HexColor(f"#{color_hex}")))
+        story.append(Spacer(1, 2*mm))
+        total_w = sum(s["wins"] for s in stats.values())
+        total_t = sum(s["total"] for s in stats.values())
+        wr = round(total_w / total_t * 100, 1) if total_t else 0
+        wr_hex = "22c55e" if wr >= 50 else ("f59e0b" if wr >= 35 else "ef4444")
+        story.append(pg(
+            f"Week: <b>{total_w}</b> wins / <b>{total_t}</b> picks  |  "
+            f"Win rate: <font color='#{wr_hex}'><b>{wr}%</b></font>"
+            f"  (Win = next-day gain &gt;1%)",
+            size=8, color=LGRAY
+        ))
+        story.append(Spacer(1, 2*mm))
 
-    # Summary row
-    total_w = sum(s["wins"] for s in runner_stats.values())
-    total_l = sum(s["losses"] for s in runner_stats.values())
-    total_t = sum(s["total"] for s in runner_stats.values())
-    overall_wr = round(total_w / total_t * 100, 1) if total_t else 0
-    wr_color = GREEN if overall_wr >= 50 else (YELLOW if overall_wr >= 35 else RED)
-    story.append(pg(
-        f"Week total: <b>{total_w}</b> wins / <b>{total_t}</b> picks  |  "
-        f"Win rate: <font color='#{('22c55e' if overall_wr>=50 else ('f59e0b' if overall_wr>=35 else 'ef4444'))}'>"
-        f"<b>{overall_wr}%</b></font>  "
-        f"(Win = next-day gain &gt; 1%)", size=8, color=LGRAY
-    ))
-    story.append(Spacer(1, 2*mm))
+        hdr  = ["Date", "Picks", "Wins", "Losses", "Neutral", "Win %", "Best Pick"]
+        rows = [hdr]
+        cw_  = [26*mm, 16*mm, 13*mm, 13*mm, 16*mm, 16*mm, 56*mm]
+        for i, d in enumerate(week_dates[:-1]):
+            s    = stats.get(d, {})
+            best = ""
+            if s.get("details"):
+                b = s["details"][0]
+                best = f"{b['symbol']} ({b['pchange']:+.1f}%)"
+            rows.append([d, str(s.get("total",0)), str(s.get("wins",0)),
+                         str(s.get("losses",0)), str(s.get("neutral",0)),
+                         f"{s.get('win_rate',0)}%", best])
+        fri = week_dates[-1]
+        fri_n = len(runner_by_day_src.get(fri, []))
+        rows.append([fri, str(fri_n), "—", "—", "—", "Pending", "Next Monday"])
 
-    # Per-day breakdown table
-    wd_header = ["Date", "Runners", "Wins", "Losses", "Neutral", "Win Rate", "Best Pick"]
-    wd_rows   = [wd_header]
-    cw = [28*mm, 18*mm, 14*mm, 14*mm, 16*mm, 18*mm, 48*mm]
-    for i, d in enumerate(week_dates[:-1]):   # Mon-Thu (Fri runners → next week)
-        s    = runner_stats.get(d, {})
-        best = ""
-        if s.get("details"):
-            b = s["details"][0]
-            best = f"{b['symbol']} ({b['pchange']:+.1f}%)"
-        wr   = s.get("win_rate", 0)
-        wd_rows.append([
-            d,
-            str(s.get("total", 0)),
-            str(s.get("wins", 0)),
-            str(s.get("losses", 0)),
-            str(s.get("neutral", 0)),
-            f"{wr}%",
-            best,
-        ])
-    # Friday row — no next-day data yet
-    fri = week_dates[-1]
-    fr_count = len(runner_by_day.get(fri, []))
-    wd_rows.append([fri, str(fr_count), "—", "—", "—", "Pending", "Next Monday"])
+        t_, ts_ = _table(rows, cw_)
+        for i, d in enumerate(week_dates[:-1], 1):
+            wr_d = stats.get(d, {}).get("win_rate", 0)
+            c_   = GREEN if wr_d >= 50 else (YELLOW if wr_d >= 35 else RED)
+            ts_.add("TEXTCOLOR", (5, i), (5, i), c_)
+            ts_.add("FONTNAME",  (5, i), (5, i), "Helvetica-Bold")
+        t_.setStyle(ts_)
+        story.append(t_)
 
-    t, ts = _table(wd_rows, cw)
-    for i, d in enumerate(week_dates[:-1], 1):
-        wr = runner_stats.get(d, {}).get("win_rate", 0)
-        c  = GREEN if wr >= 50 else (YELLOW if wr >= 35 else RED)
-        ts.add("TEXTCOLOR", (5, i), (5, i), c)
-        ts.add("FONTNAME",  (5, i), (5, i), "Helvetica-Bold")
-    t.setStyle(ts)
-    story.append(t)
-    story.append(Spacer(1, 4*mm))
-
-    # Top runner hits of the week
-    all_hits = []
-    for d in week_dates[:-1]:
-        for det in runner_stats.get(d, {}).get("details", []):
-            if det["outcome"] == "WIN":
-                all_hits.append(det)
-    if all_hits:
-        all_hits.sort(key=lambda x: x["pchange"], reverse=True)
-        story.append(pg("Best Runner Hits This Week", size=9, bold=True, color=GREEN))
-        story.append(Spacer(1, 1*mm))
-        hits_rows = [["Symbol", "Next-Day Gain", "Outcome"]]
-        cw2 = [50*mm, 50*mm, 50*mm]
-        for h in all_hits[:10]:
-            hits_rows.append([h["symbol"], f"+{h['pchange']:.2f}%", "✓ WIN"])
-        t2, ts2 = _table(hits_rows, cw2)
-        for i in range(1, len(hits_rows)):
-            ts2.add("TEXTCOLOR", (1, i), (2, i), GREEN)
-        t2.setStyle(ts2)
-        story.append(t2)
+        # Best hits
+        hits = sorted(
+            [d for s in stats.values() for d in s.get("details", []) if d["outcome"] == "WIN"],
+            key=lambda x: x["pchange"], reverse=True
+        )[:8]
+        if hits:
+            story.append(Spacer(1, 1*mm))
+            h_rows = [["Best Hits", "Next-Day Gain"]]
+            cw_h   = [80*mm, 40*mm]
+            for h in hits:
+                h_rows.append([h["symbol"], f"+{h['pchange']:.2f}%"])
+            th, tsh = _table(h_rows, cw_h, header_color=colors.HexColor(f"#{color_hex}"))
+            for i in range(1, len(h_rows)):
+                tsh.add("TEXTCOLOR", (1, i), (1, i), GREEN)
+            th.setStyle(tsh)
+            story.append(th)
         story.append(Spacer(1, 4*mm))
 
+    _runner_section("2:45 PM Report", pm_stats,  pm_runners_by_day,  "3b82f6")
+    story.append(Spacer(1, 2*mm))
+    _runner_section("4:00 PM EOD Report", eod_stats, eod_runners_by_day, "f59e0b")
     story.append(hr())
 
     # ── R1 Alert Win Rate ──────────────────────────────────────────────────────
@@ -388,9 +379,16 @@ async def weekly_scan_and_send() -> None:
     week_dates = _week_dates()
     logger.info("Week dates: %s", week_dates)
 
-    # ── Load runners for each day ──────────────────────────────────────────────
-    runner_by_day = load_week_runners_db(week_dates)
-    all_runner_syms = list({r["symbol"] for runners in runner_by_day.values() for r in runners})
+    # ── Load runners for each day — PM (2:45) and EOD (4:00) separately ────────
+    pm_runners_by_day  = load_week_runners_db(week_dates, report_type="pm")
+    eod_runners_by_day = load_week_runners_db(week_dates, report_type="eod")
+    runner_by_day = eod_runners_by_day  # used for loser context
+    all_runner_syms = list({
+        r["symbol"]
+        for rd in [pm_runners_by_day, eod_runners_by_day]
+        for runners in rd.values()
+        for r in runners
+    })
 
     # ── Fetch Nifty weekly performance ────────────────────────────────────────
     nifty_weekly_pct = 0.0
@@ -412,15 +410,16 @@ async def weekly_scan_and_send() -> None:
     if all_runner_syms:
         stock_perf = await _fetch_stock_perf(all_runner_syms)
 
-    # ── Calculate runner win rates per day ────────────────────────────────────
-    runner_stats = {}
-    for i, d in enumerate(week_dates[:-1]):         # Mon-Thu only
+    # ── Calculate runner win rates per day (PM + EOD separately) ─────────────
+    pm_stats  = {}
+    eod_stats = {}
+    for i, d in enumerate(week_dates[:-1]):   # Mon-Thu only (Fri → next week)
         next_d = week_dates[i + 1]
-        runners = runner_by_day.get(d, [])
-        if runners:
-            runner_stats[d] = _win_rate(runners, next_d, stock_perf)
-        else:
-            runner_stats[d] = {"wins": 0, "losses": 0, "neutral": 0, "total": 0, "win_rate": 0, "details": []}
+        pm_r  = pm_runners_by_day.get(d, [])
+        eod_r = eod_runners_by_day.get(d, [])
+        pm_stats[d]  = _win_rate(pm_r,  next_d, stock_perf) if pm_r  else {"wins":0,"losses":0,"neutral":0,"total":0,"win_rate":0,"details":[]}
+        eod_stats[d] = _win_rate(eod_r, next_d, stock_perf) if eod_r else {"wins":0,"losses":0,"neutral":0,"total":0,"win_rate":0,"details":[]}
+    runner_stats = eod_stats  # for AI summary
 
     # ── Load R1 alerts & calculate win rate ───────────────────────────────────
     r1_alerts_raw = load_week_r1_alerts_db(week_dates)
@@ -460,23 +459,36 @@ async def weekly_scan_and_send() -> None:
     except Exception as exc:
         logger.warning("Top losers fetch failed: %s", exc)
 
+    # ── Combined stats for AI + caption ──────────────────────────────────────
+    combined_stats = {}
+    for d in week_dates[:-1]:
+        pm_s  = pm_stats.get(d,  {"wins":0,"total":0,"details":[]})
+        eod_s = eod_stats.get(d, {"wins":0,"total":0,"details":[]})
+        combined_stats[d] = {
+            "wins":  pm_s["wins"]  + eod_s["wins"],
+            "total": pm_s["total"] + eod_s["total"],
+            "details": pm_s["details"] + eod_s["details"],
+        }
+
     # ── AI analysis ───────────────────────────────────────────────────────────
     ai_result = await asyncio.to_thread(
-        _generate_weekly_ai, week_dates, runner_stats, r1_summary, top_losers, nifty_weekly_pct
+        _generate_weekly_ai, week_dates, combined_stats, r1_summary, top_losers, nifty_weekly_pct
     )
 
     # ── Build PDF ─────────────────────────────────────────────────────────────
     pdf_bytes = await asyncio.to_thread(
         _build_weekly_pdf,
-        week_dates, runner_by_day, runner_stats,
+        week_dates, runner_by_day,
+        pm_stats, eod_stats,
+        pm_runners_by_day, eod_runners_by_day,
         r1_alerts, r1_summary,
         top_losers, nifty_weekly_pct,
         ai_result,
     )
 
     # ── Send to Telegram ──────────────────────────────────────────────────────
-    total_w = sum(s["wins"] for s in runner_stats.values())
-    total_t = sum(s["total"] for s in runner_stats.values())
+    total_w = sum(s["wins"]  for s in combined_stats.values())
+    total_t = sum(s["total"] for s in combined_stats.values())
     overall_wr = round(total_w / total_t * 100, 1) if total_t else 0
     caption = (
         f"📊 Weekly Report — {week_dates[0]} to {week_dates[-1]}\n"

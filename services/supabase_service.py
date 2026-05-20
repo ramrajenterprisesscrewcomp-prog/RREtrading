@@ -86,42 +86,55 @@ def delete_holding_db(symbol: str) -> bool:
 
 # ── Prev Runners ──────────────────────────────────────────────────────────────
 
-def save_runners_db(runners: list[dict], date_str: str) -> bool:
-    """Upsert today's runners — keeps full history (weekly report needs Mon-Fri data)."""
+def save_runners_db(runners: list[dict], date_str: str,
+                    report_type: str = "eod") -> bool:
+    """Upsert runners — keeps full history. report_type = 'eod' | 'pm'."""
     db = get_db()
     if db is None:
         return False
     try:
         rows = [
             {
-                "date":    date_str,
-                "symbol":  r.get("symbol", ""),
-                "pchange": float(r.get("pchange", 0)),
-                "close":   float(r.get("close", 0) or r.get("ltp", 0)),
+                "date":        date_str,
+                "symbol":      r.get("symbol", ""),
+                "pchange":     float(r.get("pchange", 0)),
+                "close":       float(r.get("close", 0) or r.get("ltp", 0)),
+                "report_type": report_type,
             }
             for r in runners
             if r.get("symbol")
         ]
         if rows:
-            db.table("prev_runners").upsert(rows, on_conflict="date,symbol").execute()
+            db.table("prev_runners").upsert(
+                rows, on_conflict="date,symbol,report_type"
+            ).execute()
         return True
     except Exception as exc:
         logger.warning("Supabase save_runners failed: %s", exc)
         return False
 
 
-def load_week_runners_db(date_list: list[str]) -> dict[str, list[dict]]:
-    """Return {date_str: [runner_dicts]} for each date in date_list."""
+def load_week_runners_db(date_list: list[str],
+                         report_type: str | None = None) -> dict[str, list[dict]]:
+    """Return {date_str: [runner_dicts]} filtered by report_type if given."""
     db = get_db()
     if db is None:
         return {}
     try:
-        res = db.table("prev_runners").select("*").in_("date", date_list).execute()
+        q = db.table("prev_runners").select("*").in_("date", date_list)
+        if report_type:
+            q = q.eq("report_type", report_type)
+        res = q.execute()
         result: dict[str, list[dict]] = {d: [] for d in date_list}
         for r in (res.data or []):
             d = r["date"]
             if d in result:
-                result[d].append({"symbol": r["symbol"], "pchange": r["pchange"], "close": r["close"]})
+                result[d].append({
+                    "symbol":      r["symbol"],
+                    "pchange":     r["pchange"],
+                    "close":       r["close"],
+                    "report_type": r.get("report_type", "eod"),
+                })
         return result
     except Exception as exc:
         logger.warning("Supabase load_week_runners failed: %s", exc)

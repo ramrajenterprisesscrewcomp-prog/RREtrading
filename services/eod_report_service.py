@@ -35,7 +35,7 @@ def _save_runners(runners: list[dict], date_str: str) -> None:
         logger.warning("Could not save runners cache: %s", exc)
     try:
         from services.supabase_service import save_runners_db
-        save_runners_db(runners, date_str)
+        save_runners_db(runners, date_str, report_type="eod")
     except Exception as exc:
         logger.warning("Supabase save_runners failed: %s", exc)
 

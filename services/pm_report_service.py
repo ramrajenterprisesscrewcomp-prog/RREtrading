@@ -126,7 +126,9 @@ def _generate_ai_picks(
     runners:      list[dict],
 ) -> str:
     try:
-        from services.openai_service import _get_client
+        from services.openai_service import _get_client, _under_limit, _record_cost
+        if not _under_limit():
+            return _fallback_picks(long_buildup, breakouts, pullbacks, runners)
 
         lb_syms  = [r.get("symbol", "") for r in long_buildup[:10]]
         bo_syms  = [r["symbol"] for r in breakouts[:10]]
@@ -169,6 +171,7 @@ def _generate_ai_picks(
             max_tokens=650,
             temperature=0.35,
         )
+        _record_cost(resp.usage)
         return resp.choices[0].message.content.strip()
 
     except Exception as exc:
@@ -780,6 +783,11 @@ async def pm_scan_and_send() -> None:
             "PM Report sent — %d LB · %d breakouts · %d pullbacks · %d runners",
             len(long_buildup), len(breakouts), len(pullbacks), len(runners),
         )
+        try:
+            from services.supabase_service import save_runners_db
+            save_runners_db(runners, date_str, report_type="pm")
+        except Exception:
+            pass
 
     except Exception as exc:
         logger.warning("PM Report error: %s", exc, exc_info=True)
