@@ -39,6 +39,17 @@ if %errorlevel%==0 (
     echo [FAIL] EOD Report task — check you ran as Administrator
 )
 
+:: Weekly Report — 9:00 AM Saturday
+schtasks /create /tn "RRE Weekly Report 9:00AM" ^
+  /tr "cmd.exe /c \"%BAT_DIR%\run_weekly_report.bat\"" ^
+  /sc WEEKLY /d SAT /st 09:00 ^
+  /f /rl HIGHEST /ru "%USERNAME%"
+if %errorlevel%==0 (
+    echo [OK] Weekly Report task created — fires at 9:00 AM Saturday
+) else (
+    echo [FAIL] Weekly Report task — check you ran as Administrator
+)
+
 echo.
 echo Done. To verify: open Task Scheduler and look for "RRE" tasks.
 echo To test now: schtasks /run /tn "RRE Pre-Market 9:30AM"

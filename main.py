@@ -55,6 +55,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(eod_report_loop())
     from services.pivot_scanner_service import pivot_alert_loop
     asyncio.create_task(pivot_alert_loop())
+    from services.weekly_report_service import weekly_report_loop
+    asyncio.create_task(weekly_report_loop())
     yield
 
 
@@ -632,6 +634,17 @@ async def pm_report_endpoint():
         from services.pm_report_service import pm_scan_and_send
         asyncio.create_task(pm_scan_and_send())
         return {"status": "generating", "message": "PM report started — PDF will be sent to Telegram"}
+    except Exception as exc:
+        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/weekly-report")
+async def weekly_report_endpoint():
+    """Manually trigger the Saturday weekly performance report."""
+    try:
+        from services.weekly_report_service import weekly_scan_and_send
+        asyncio.create_task(weekly_scan_and_send())
+        return {"status": "generating", "message": "Weekly report started — PDF will be sent to Telegram"}
     except Exception as exc:
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
 

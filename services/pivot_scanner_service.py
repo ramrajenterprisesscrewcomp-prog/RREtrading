@@ -224,6 +224,15 @@ async def pivot_alert_loop() -> None:
                     if new_alerts:
                         logger.info("Pivot: %d new R1 crossovers", len(new_alerts))
                         await _send_pivot_alerts(new_alerts)
+                        try:
+                            from services.supabase_service import log_r1_alert_db
+                            date_s = now.strftime("%d %b %Y")
+                            for a in new_alerts:
+                                log_r1_alert_db(a["symbol"], float(a.get("r1", 0)),
+                                                float(a.get("ltp", 0)),
+                                                float(a.get("breakout_pct", 0)), date_s)
+                        except Exception:
+                            pass
 
             except Exception as exc:
                 logger.warning("Pivot alert loop error: %s", exc)
