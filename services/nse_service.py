@@ -1022,3 +1022,53 @@ async def get_live_ltps(symbols: list[str]) -> dict[str, float]:
     """Fetch live LTPs for multiple symbols in parallel. Returns {symbol: ltp}."""
     results = await asyncio.gather(*[get_live_ltp(s) for s in symbols])
     return {sym: ltp for sym, ltp in zip(symbols, results) if ltp > 0}
+
+
+async def get_fii_dii_data() -> dict:
+    """Fetch today's FII / DII market activity from NSE."""
+    try:
+        data = await _nse_get("/api/fiidiiTradeReact")
+        rows = data if isinstance(data, list) else []
+        result = {}
+        for row in rows:
+            cat = row.get("category", "").strip()
+            result[cat] = {
+                "buy_value":  float(str(row.get("buyValue",  "0")).replace(",", "") or 0),
+                "sell_value": float(str(row.get("sellValue", "0")).replace(",", "") or 0),
+                "net_value":  float(str(row.get("netValue",  "0")).replace(",", "") or 0),
+            }
+        return result
+    except Exception as exc:
+        logger.warning("FII/DII fetch failed: %s", exc)
+        return {}
+
+
+async def get_stock_announcements(symbol: str, limit: int = 5) -> list[str]:
+    """Fetch recent corporate announcements for a stock from NSE."""
+    try:
+        data = await _nse_get(
+            f"/api/corp-info?symbol={symbol}&corpType=announcements&market=equities"
+        )
+        items = data if isinstance(data, list) else data.get("announcements", [])
+        headlines = []
+        for item in items[:limit]:
+            subject = item.get("subject") or item.get("desc") or item.get("attchmntText", "")
+            if subject:
+                headlines.append(subject[:120])
+        return headlines
+    except Exception as exc:
+        logger.warning("Announcements fetch failed [%s]: %s", symbol, exc)
+        return []
+
+
+async def get_nifty50_top_gainers(n: int = 10) -> list[dict]:
+    """Return top N gainers from Nifty 50 by pchange."""
+    try:
+        data = await _nse_get("/api/equity-stockIndices?index=NIFTY%2050")
+        stocks = data.get("data", [])
+        valid  = [s for s in stocks if s.get("pchange") is not None
+                  and s.get("symbol") not in ("NIFTY 50",)]
+        return sorted(valid, key=lambda x: float(x.get("pchange", 0)), reverse=True)[:n]
+    except Exception as exc:
+        logger.warning("Nifty 50 gainers failed: %s", exc)
+        return []

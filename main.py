@@ -57,6 +57,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(pivot_alert_loop())
     from services.weekly_report_service import weekly_report_loop
     asyncio.create_task(weekly_report_loop())
+    from services.evening_analysis_service import evening_report_loop
+    asyncio.create_task(evening_report_loop())
     yield
 
 
@@ -634,6 +636,36 @@ async def pm_report_endpoint():
         from services.pm_report_service import pm_scan_and_send
         asyncio.create_task(pm_scan_and_send())
         return {"status": "generating", "message": "PM report started — PDF will be sent to Telegram"}
+    except Exception as exc:
+        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
+
+
+@app.get("/api/top-gainers")
+async def top_gainers_endpoint():
+    """Top 10 gainers from Nifty 50 and Nifty 500 for dashboard."""
+    try:
+        from services.nse_service import get_nifty50_top_gainers, get_nifty500_ohlc
+        nifty50_g, nifty500_all = await asyncio.gather(
+            get_nifty50_top_gainers(10),
+            get_nifty500_ohlc(),
+        )
+        nifty50_syms = {g["symbol"] for g in nifty50_g}
+        nifty500_g = sorted(
+            [s for s in nifty500_all if s.get("pchange") and s["symbol"] not in nifty50_syms],
+            key=lambda x: float(x.get("pchange", 0)), reverse=True
+        )[:10]
+        return {"nifty50": nifty50_g, "nifty500": nifty500_g}
+    except Exception as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/evening-report")
+async def evening_report_endpoint():
+    """Manually trigger the 8 PM evening analysis report."""
+    try:
+        from services.evening_analysis_service import evening_scan_and_send
+        asyncio.create_task(evening_scan_and_send())
+        return {"status": "generating", "message": "Evening analysis started — PDF will be sent to Telegram"}
     except Exception as exc:
         return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
 

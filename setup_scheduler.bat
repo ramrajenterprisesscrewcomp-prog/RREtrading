@@ -39,6 +39,17 @@ if %errorlevel%==0 (
     echo [FAIL] EOD Report task — check you ran as Administrator
 )
 
+:: Evening Analysis — 8:00 PM Mon-Fri
+schtasks /create /tn "RRE Evening Analysis 8:00PM" ^
+  /tr "cmd.exe /c \"%BAT_DIR%\run_evening_report.bat\"" ^
+  /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 20:00 ^
+  /f /rl HIGHEST /ru "%USERNAME%"
+if %errorlevel%==0 (
+    echo [OK] Evening Analysis task created — fires at 8:00 PM weekdays
+) else (
+    echo [FAIL] Evening Analysis task — check you ran as Administrator
+)
+
 :: Weekly Report — 9:00 AM Saturday
 schtasks /create /tn "RRE Weekly Report 9:00AM" ^
   /tr "cmd.exe /c \"%BAT_DIR%\run_weekly_report.bat\"" ^

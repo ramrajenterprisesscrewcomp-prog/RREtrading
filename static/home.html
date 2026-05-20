@@ -259,6 +259,24 @@
     <span id="lastUpdate" class="text-gray-700"></span>
   </div>
 
+  <!-- ROW 0: Nifty 50 + Nifty 500 Top Gainers -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+    <div class="card p-4">
+      <div class="section-hdr text-emerald-400">⭐ Nifty 50 — Top 10 Gainers</div>
+      <div class="grid grid-cols-3 gap-1 text-xs text-gray-600 mb-1 px-1">
+        <span>Symbol</span><span class="text-right">Price</span><span class="text-right">Chg %</span>
+      </div>
+      <div id="nifty50GainersContent"><p class="text-gray-600 text-xs text-center py-4">Loading…</p></div>
+    </div>
+    <div class="card p-4">
+      <div class="section-hdr text-amber-400">⭐ Nifty 500 — Top 10 Gainers</div>
+      <div class="grid grid-cols-3 gap-1 text-xs text-gray-600 mb-1 px-1">
+        <span>Symbol</span><span class="text-right">Price</span><span class="text-right">Chg %</span>
+      </div>
+      <div id="nifty500GainersContent"><p class="text-gray-600 text-xs text-center py-4">Loading…</p></div>
+    </div>
+  </div>
+
   <!-- ROW 1: Gainers | Losers -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
 
@@ -1349,16 +1367,45 @@ async function loadPivotSignals(force = false) {
 }
 
 
+// ── TOP GAINERS (Nifty 50 + Nifty 500) ───────────────────────────────────
+function gainerRow(s) {
+  const pch = Number(s.pchange || s.pChange || 0);
+  const price = s.lastPrice || s.ltp || 0;
+  return `<div class="mover-row" style="cursor:pointer;grid-template-columns:1fr auto auto;"
+               onclick="goAnalyze('${s.symbol}')">
+    <span class="mover-sym">${s.symbol}</span>
+    <span class="mover-price">₹${fmt(price)}</span>
+    <span class="mover-pct" style="color:#10b981;">+${fmt(pch,2)}%</span>
+  </div>`;
+}
+
+async function loadTopGainers() {
+  try {
+    const d = await fetch('/api/top-gainers').then(r => r.json());
+    const n50  = (d.nifty50  || []).filter(s => s.pchange > 0);
+    const n500 = (d.nifty500 || []).filter(s => s.pchange > 0);
+    $('nifty50GainersContent').innerHTML  = n50.length  ? n50.map(gainerRow).join('')
+      : '<p class="text-gray-600 text-xs py-3 text-center">No data</p>';
+    $('nifty500GainersContent').innerHTML = n500.length ? n500.map(gainerRow).join('')
+      : '<p class="text-gray-600 text-xs py-3 text-center">No data</p>';
+  } catch(e) {
+    $('nifty50GainersContent').innerHTML = $('nifty500GainersContent').innerHTML =
+      '<p class="text-red-500 text-xs py-3 text-center">Failed</p>';
+  }
+}
+
 // ── STARTUP ───────────────────────────────────────────────────────────────
 connectSSE();
 fetchSectorMulti();
 loadTsrData();
 loadSectorAnalysis();
 loadPivotSignals();
+loadTopGainers();
 setInterval(loadTsrData,                    600000);
 setInterval(() => loadSectorAnalysis(true), 600000);
 setInterval(() => loadPivotSignals(true),   600000);
 setInterval(fetchSectorMulti,               600000);
+setInterval(loadTopGainers,                 600000);
 
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
