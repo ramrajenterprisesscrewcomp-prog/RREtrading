@@ -33,10 +33,22 @@ def _save_runners(runners: list[dict], date_str: str) -> None:
         )
     except Exception as exc:
         logger.warning("Could not save runners cache: %s", exc)
+    try:
+        from services.supabase_service import save_runners_db
+        save_runners_db(runners, date_str)
+    except Exception as exc:
+        logger.warning("Supabase save_runners failed: %s", exc)
 
 
 def _load_prev_runners() -> tuple[str, list[dict]]:
-    """Return (date_str, runners) from the last saved run, or ("", []) if none."""
+    """Return (date_str, runners) from Supabase (primary) or local JSON (fallback)."""
+    try:
+        from services.supabase_service import load_runners_db
+        result = load_runners_db()
+        if result is not None:
+            return result
+    except Exception as exc:
+        logger.warning("Supabase load_runners failed: %s", exc)
     try:
         if _RUNNERS_CACHE.exists():
             data = json.loads(_RUNNERS_CACHE.read_text(encoding="utf-8"))
@@ -1352,6 +1364,13 @@ async def eod_scan_and_send() -> None:
             "EOD Report sent — %d gainers, %d losers, %d LB, %d watchlist, %d runners",
             len(gainers), len(losers), len(long_buildup), len(watchlist), len(runners),
         )
+        try:
+            from services.supabase_service import log_report_sent
+            log_report_sent("eod", f"{len(gainers)}G {len(losers)}L {len(long_buildup)}LB {len(runners)}runners",
+                            {"gainers": len(gainers), "losers": len(losers),
+                             "buildup": len(long_buildup), "runners": len(runners)})
+        except Exception:
+            pass
 
         return {
             "pdf_bytes": pdf_bytes,

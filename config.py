@@ -37,3 +37,10 @@ CACHE_TTL_NEWS     = 1800   # 30 min — news articles
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8291092862:AAEou4Jz8OPom5uYxiFPcufZQZo_3tHIcEc")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID",   "-5073639718")
+
+# OpenAI daily spend hard limit in USD (default $0.50)
+OPENAI_DAILY_LIMIT_USD = float(os.getenv("OPENAI_DAILY_LIMIT_USD", "0.50"))
+
+# Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")

@@ -1,6 +1,7 @@
 """
 portfolio_service.py
 Personal portfolio manager — store holdings, fetch live P&L, AI analysis in reports.
+Supabase is primary storage; local JSON file is fallback.
 """
 import json
 import logging
@@ -13,17 +14,19 @@ _DATA_DIR       = pathlib.Path(__file__).parent.parent / "data"
 _PORTFOLIO_FILE = _DATA_DIR / "portfolio.json"
 
 
-def load_portfolio() -> list[dict]:
+# ── Local JSON helpers (fallback) ─────────────────────────────────────────────
+
+def _load_json() -> list[dict]:
     _DATA_DIR.mkdir(exist_ok=True)
     try:
         if _PORTFOLIO_FILE.exists():
             return json.loads(_PORTFOLIO_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
-        logger.warning("Could not load portfolio: %s", exc)
+        logger.warning("Could not load portfolio JSON: %s", exc)
     return []
 
 
-def save_portfolio(holdings: list[dict]) -> None:
+def _save_json(holdings: list[dict]) -> None:
     _DATA_DIR.mkdir(exist_ok=True)
     try:
         _PORTFOLIO_FILE.write_text(
@@ -31,34 +34,53 @@ def save_portfolio(holdings: list[dict]) -> None:
             encoding="utf-8",
         )
     except Exception as exc:
-        logger.warning("Could not save portfolio: %s", exc)
+        logger.warning("Could not save portfolio JSON: %s", exc)
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def load_portfolio() -> list[dict]:
+    from services.supabase_service import load_portfolio_db
+    result = load_portfolio_db()
+    if result is not None:
+        _save_json(result)          # keep local copy in sync
+        return result
+    return _load_json()             # fallback
+
+
+def save_portfolio(holdings: list[dict]) -> None:
+    _save_json(holdings)
 
 
 def add_or_update_holding(symbol: str, qty: float, avg_price: float) -> list[dict]:
-    holdings = load_portfolio()
-    symbol   = symbol.upper().strip()
-    today    = datetime.now().strftime("%d %b %Y")
+    from services.supabase_service import upsert_holding_db
+    symbol = symbol.upper().strip()
+    today  = datetime.now().strftime("%d %b %Y")
+
+    # Try Supabase first
+    upsert_holding_db(symbol, qty, avg_price, added_on=today, updated_on=today)
+
+    # Also keep JSON in sync
+    holdings = _load_json()
     for h in holdings:
         if h["symbol"] == symbol:
             h["qty"]        = qty
             h["avg_price"]  = avg_price
             h["updated_on"] = today
-            save_portfolio(holdings)
+            _save_json(holdings)
             return holdings
-    holdings.append({
-        "symbol":    symbol,
-        "qty":       qty,
-        "avg_price": avg_price,
-        "added_on":  today,
-    })
-    save_portfolio(holdings)
+    holdings.append({"symbol": symbol, "qty": qty, "avg_price": avg_price, "added_on": today})
+    _save_json(holdings)
     return holdings
 
 
 def remove_holding(symbol: str) -> list[dict]:
-    holdings = load_portfolio()
-    holdings = [h for h in holdings if h["symbol"] != symbol.upper().strip()]
-    save_portfolio(holdings)
+    from services.supabase_service import delete_holding_db
+    symbol = symbol.upper().strip()
+    delete_holding_db(symbol)
+
+    holdings = [h for h in _load_json() if h["symbol"] != symbol]
+    _save_json(holdings)
     return holdings
 
 
@@ -102,8 +124,8 @@ def generate_portfolio_analysis(portfolio: list[dict], sector_context: str = "")
     if not portfolio:
         return {"stocks": {}, "overall": ""}
     try:
-        from services.openai_service import _get_client, _is_ai_hours
-        if not _is_ai_hours():
+        from services.openai_service import _get_client, _is_ai_hours, _under_limit, _record_cost
+        if not _is_ai_hours() or not _under_limit():
             return {"stocks": {}, "overall": ""}
 
         lines = []
@@ -141,6 +163,7 @@ def generate_portfolio_analysis(portfolio: list[dict], sector_context: str = "")
             temperature=0.3,
             response_format={"type": "json_object"},
         )
+        _record_cost(resp.usage)
         data = json.loads(resp.choices[0].message.content)
         return {
             "stocks":  data.get("stocks", {}),
