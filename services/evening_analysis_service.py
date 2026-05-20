@@ -80,17 +80,18 @@ def _generate_stock_ai(gainers_data: list[dict]) -> dict[str, str]:
 
         prompt = (
             "You are a senior Indian equity research analyst.\n"
-            "For each stock below, explain in 2 sentences WHY it gained today. "
-            "Cover: technical signal (pattern/RSI/volume), fundamental catalyst "
-            "(news/policy/deal/FII buying), and sector context if relevant.\n\n"
+            "For each stock below, write EXACTLY 50 words explaining WHY it gained today. "
+            "Cover: technical signal (candlestick pattern, RSI level, volume surge), "
+            "fundamental catalyst (news/policy/deal/earnings/FII buying), "
+            "and sector/macro context. Be specific — mention the actual pattern and catalyst.\n\n"
             + "\n".join(lines)
-            + "\n\nRespond ONLY in JSON (no markdown): "
-            '{"SYMBOL": "2-sentence reason", ...}'
+            + "\n\nRespond ONLY in JSON (no markdown). Each value must be ~50 words: "
+            '{"SYMBOL": "50-word explanation", ...}'
         )
         resp = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
+            max_tokens=2000,
             temperature=0.3,
             response_format={"type": "json_object"},
         )
