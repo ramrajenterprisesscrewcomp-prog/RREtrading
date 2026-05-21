@@ -3,7 +3,9 @@ import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -117,7 +119,7 @@ async def _build_overview_data() -> dict:
         "trade_date":     mkt_status.get("trade_date", ""),
         "ai_summary":     "",
         "errors":         errors,
-        "timestamp":      datetime.now().isoformat(),
+        "timestamp":      datetime.now(_IST).isoformat(),
     }
     _overview_cache["d"] = data
     return data
@@ -467,7 +469,7 @@ async def analyze_stock(symbol: str):
         # Meta
         "reference_sites": REFERENCE_SITES,
         "errors":          errors,
-        "data_timestamp":  datetime.now().isoformat(),
+        "data_timestamp":  datetime.now(_IST).isoformat(),
     }
 
     response_data["ai_summary"]   = ""
@@ -481,7 +483,7 @@ async def analyze_stock(symbol: str):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok", "timestamp": datetime.now(_IST).isoformat()}
 
 
 @app.get("/api/references")
@@ -526,7 +528,7 @@ async def trigger_daily_report():
 async def sector_rotation_multi_endpoint():
     try:
         data = await get_sector_rotation_multi()
-        return JSONResponse(content={"sectors": data, "timestamp": datetime.now().isoformat()})
+        return JSONResponse(content={"sectors": data, "timestamp": datetime.now(_IST).isoformat()})
     except Exception as exc:
         return JSONResponse(content={"sectors": [], "error": str(exc)}, status_code=500)
 
@@ -595,7 +597,7 @@ async def pivot_signals_endpoint(force: bool = False):
     except Exception as exc:
         return JSONResponse(content={
             "bullish": [], "bearish": [], "total_scanned": 0,
-            "error": str(exc), "timestamp": datetime.now().isoformat(),
+            "error": str(exc), "timestamp": datetime.now(_IST).isoformat(),
         })
 
 
@@ -642,19 +644,19 @@ async def pm_report_endpoint():
 
 @app.get("/api/top-gainers")
 async def top_gainers_endpoint():
-    """Top 10 gainers from Nifty 50 and Nifty 500 for dashboard."""
+    """Top 10 gainers: NSE overall (all listed) and Nifty 500 for dashboard."""
     try:
-        from services.nse_service import get_nifty50_top_gainers, get_nifty500_ohlc
-        nifty50_g, nifty500_all = await asyncio.gather(
-            get_nifty50_top_gainers(10),
+        from services.nse_service import get_nse_overall_top_gainers, get_nifty500_ohlc
+        nse_g, nifty500_all = await asyncio.gather(
+            get_nse_overall_top_gainers(10),
             get_nifty500_ohlc(),
         )
-        nifty50_syms = {g["symbol"] for g in nifty50_g}
+        nse_syms = {g["symbol"] for g in nse_g}
         nifty500_g = sorted(
-            [s for s in nifty500_all if s.get("pchange") and s["symbol"] not in nifty50_syms],
+            [s for s in nifty500_all if s.get("pchange") and s["symbol"] not in nse_syms],
             key=lambda x: float(x.get("pchange", 0)), reverse=True
         )[:10]
-        return {"nifty50": nifty50_g, "nifty500": nifty500_g}
+        return {"nse_overall": nse_g, "nifty500": nifty500_g}
     except Exception as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 

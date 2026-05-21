@@ -1061,14 +1061,35 @@ async def get_stock_announcements(symbol: str, limit: int = 5) -> list[str]:
         return []
 
 
-async def get_nifty50_top_gainers(n: int = 10) -> list[dict]:
-    """Return top N gainers from Nifty 50 by pchange."""
+_nse_overall_cache: TTLCache = TTLCache(maxsize=1, ttl=60)
+
+
+async def get_nse_overall_top_gainers(n: int = 10) -> list[dict]:
+    """Return top N gainers from all NSE-listed stocks via live-analysis-variations."""
+    if "d" in _nse_overall_cache:
+        return _nse_overall_cache["d"][:n]
     try:
-        data = await _nse_get("/api/equity-stockIndices?index=NIFTY%2050")
-        stocks = data.get("data", [])
-        valid  = [s for s in stocks if s.get("pchange") is not None
-                  and s.get("symbol") not in ("NIFTY 50",)]
-        return sorted(valid, key=lambda x: float(x.get("pchange", 0)), reverse=True)[:n]
+        data = await _nse_get("/api/live-analysis-variations?index=gainers")
+        # Response shape: {"NIFTY":[...], "FO":[...], "ALLSEC":[...]}
+        stocks = (data.get("ALLSEC") or data.get("FO") or
+                  (data if isinstance(data, list) else []))
+        result = []
+        for s in stocks:
+            sym = s.get("symbol") or s.get("Symbol", "")
+            if not sym or sym.upper().startswith("NIFTY"):
+                continue
+            pch   = s.get("netPrice") or s.get("pChange") or s.get("pchange") or 0
+            price = float(str(s.get("ltP") or s.get("ltp") or s.get("lastPrice") or 0).replace(",", ""))
+            result.append({
+                "symbol":    sym,
+                "pchange":   float(pch),
+                "close":     price,
+                "lastPrice": price,
+            })
+        result = sorted(result, key=lambda x: x["pchange"], reverse=True)
+        if result:
+            _nse_overall_cache["d"] = result
+        return result[:n]
     except Exception as exc:
-        logger.warning("Nifty 50 gainers failed: %s", exc)
+        logger.warning("NSE overall gainers failed: %s", exc)
         return []

@@ -105,7 +105,7 @@ def _generate_stock_ai(gainers_data: list[dict]) -> dict[str, str]:
 
 # ── PDF builder ───────────────────────────────────────────────────────────────
 
-def _build_evening_pdf(date_str: str, nifty50_gainers: list[dict],
+def _build_evening_pdf(date_str: str, nse_gainers: list[dict],
                        nifty500_gainers: list[dict], fii_dii: dict,
                        tech_map: dict, ai_map: dict) -> bytes:
     from io import BytesIO
@@ -206,7 +206,7 @@ def _build_evening_pdf(date_str: str, nifty50_gainers: list[dict],
             rows.append([
                 str(i),
                 sym,
-                f"₹{float(g.get('lastPrice', g.get('ltp', 0))):,.2f}",
+                f"₹{float(g.get('lastPrice') or g.get('ltp') or g.get('close') or 0):,.2f}",
                 f"+{float(g.get('pchange', 0)):.2f}%",
                 f"{tech.get('vol_ratio', 0):.1f}x",
                 f"{tech.get('rsi', 0):.0f}",
@@ -261,9 +261,9 @@ def _build_evening_pdf(date_str: str, nifty50_gainers: list[dict],
         story.append(Spacer(1, 3*mm))
         story.append(_hr())
 
-    _gainers_section("Nifty 50 — Top 10 Gainers", nifty50_gainers,
+    _gainers_section("NSE — Top 10 Gainers", nse_gainers,
                      colors.HexColor("#6366f1"))
-    _gainers_section("Nifty 500 — Top 10 Gainers (excl. Nifty 50)",
+    _gainers_section("Nifty 500 — Top 10 Gainers (excl. NSE Top 10)",
                      nifty500_gainers, colors.HexColor("#f59e0b"))
 
     # ── Footer ────────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ def _build_evening_pdf(date_str: str, nifty50_gainers: list[dict],
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 async def evening_scan_and_send() -> None:
-    from services.nse_service import (get_nifty50_top_gainers, get_nifty500_ohlc,
+    from services.nse_service import (get_nse_overall_top_gainers, get_nifty500_ohlc,
                                        get_fii_dii_data, get_stock_announcements)
     from services.telegram_service import send_document
     from services.technical_analysis import summarise
@@ -289,20 +289,20 @@ async def evening_scan_and_send() -> None:
     logger.info("Evening Analysis: starting for %s", date_str)
 
     # ── Fetch top gainers ─────────────────────────────────────────────────────
-    nifty50_g, nifty500_all, fii_dii = await asyncio.gather(
-        get_nifty50_top_gainers(10),
+    nse_g, nifty500_all, fii_dii = await asyncio.gather(
+        get_nse_overall_top_gainers(10),
         get_nifty500_ohlc(),
         get_fii_dii_data(),
     )
 
-    nifty50_syms = {g["symbol"] for g in nifty50_g}
+    nse_syms = {g["symbol"] for g in nse_g}
     nifty500_sorted = sorted(
-        [s for s in nifty500_all if s.get("pchange") and s["symbol"] not in nifty50_syms],
+        [s for s in nifty500_all if s.get("pchange") and s["symbol"] not in nse_syms],
         key=lambda x: float(x.get("pchange", 0)), reverse=True
     )[:10]
 
-    all_gainers   = nifty50_g + nifty500_sorted
-    all_syms      = [g["symbol"] for g in all_gainers]
+    all_gainers = nse_g + nifty500_sorted
+    all_syms    = [g["symbol"] for g in all_gainers]
 
     # ── Fetch OHLCV + announcements in parallel ────────────────────────────────
     ohlcv_map, *ann_results = await asyncio.gather(
@@ -339,14 +339,14 @@ async def evening_scan_and_send() -> None:
     # ── Build PDF ─────────────────────────────────────────────────────────────
     pdf_bytes = await asyncio.to_thread(
         _build_evening_pdf,
-        date_str, nifty50_g, nifty500_sorted, fii_dii, tech_map, ai_map
+        date_str, nse_g, nifty500_sorted, fii_dii, tech_map, ai_map
     )
 
     # ── Send to Telegram ──────────────────────────────────────────────────────
-    top5 = ", ".join(g["symbol"] for g in nifty50_g[:5])
+    top5 = ", ".join(g["symbol"] for g in nse_g[:5])
     caption = (
         f"📈 Evening Analysis — {date_str}\n"
-        f"Nifty 50 Top Gainers: {top5}\n"
+        f"NSE Top Gainers: {top5}\n"
         f"Technical + AI reasons + FII/DII inside"
     )
     filename = f"RRE_Evening_{now.strftime('%Y%m%d')}.pdf"

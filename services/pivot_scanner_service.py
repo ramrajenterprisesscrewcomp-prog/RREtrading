@@ -151,10 +151,8 @@ async def scan_pivot_breakouts() -> dict:
 
 async def _send_pivot_alerts(alerts: list[dict]) -> None:
     from services.telegram_service import send_message
+    now_ist = _now_ist()
     for a in alerts:
-        now_ist = _now_ist()
-        if now_ist.hour >= 11:
-            break                                         # hard cutoff — never send after 11 AM
         msg = (
             f"📡 <b>R1 Breakout · {a['symbol']}</b>  "
             f"<i>{now_ist.strftime('%H:%M IST')}</i>\n\n"
@@ -170,46 +168,92 @@ async def _send_pivot_alerts(alerts: list[dict]) -> None:
             logger.warning("Pivot alert failed [%s]: %s", a["symbol"], exc)
 
 
+async def _send_morning_watchlist(bullish: list[dict], bearish: list[dict]) -> None:
+    """9:20 AM summary — all stocks already above/below pivot levels at market open."""
+    from services.telegram_service import send_message
+    now_ist = _now_ist()
+    lines = [f"🌅 <b>R1/S1 Morning Watchlist — {now_ist.strftime('%d %b %Y %H:%M IST')}</b>\n"]
+    if bullish:
+        lines.append(f"<b>🟢 Above R1 ({len(bullish)} stocks):</b>")
+        for s in bullish[:10]:
+            lines.append(
+                f"  {s['symbol']}  LTP ₹{s['ltp']:,.0f}  "
+                f"+{s['breakout_pct']:.1f}% above R1 ₹{s['r1']:,.0f}"
+            )
+    else:
+        lines.append("🟢 No stocks above R1 at open")
+    if bearish:
+        lines.append(f"\n<b>🔴 Below S1 ({len(bearish)} stocks):</b>")
+        for s in bearish[:5]:
+            lines.append(
+                f"  {s['symbol']}  LTP ₹{s['ltp']:,.0f}  "
+                f"{s['breakout_pct']:.1f}% below S1 ₹{s['s1']:,.0f}"
+            )
+    lines.append("\n<i>Nifty 200 · R1/S1 from yesterday's OHLC</i>")
+    try:
+        await send_message("\n".join(lines))
+    except Exception as exc:
+        logger.warning("Morning watchlist send failed: %s", exc)
+
+
 # ── Background loop — owns ALL alert state, never shared with API ─────────────
 
 async def pivot_alert_loop() -> None:
     """
-    Runs every 60 s on weekdays 9:15–11:00 AM IST.
-    All alert dedup state is LOCAL to this function — API calls never trigger alerts.
+    Runs every 60 s on weekdays 9:15 AM – 3:30 PM IST (full trading day).
+    Sends a morning watchlist at 9:20 AM, then fires individual alerts on new R1 crossovers.
+    All alert dedup state is LOCAL — API calls never trigger alerts.
     """
     logger.info("Pivot alert loop started")
     await asyncio.sleep(30)
 
-    alerted:         set[str]    = set()
-    alert_date:      date | None = None
-    prev_above_r1:   set[str]    = set()
-    baseline_seeded: bool        = False
+    alerted:               set[str]    = set()
+    alert_date:            date | None = None
+    prev_above_r1:         set[str]    = set()
+    baseline_seeded:       bool        = False
+    watchlist_sent:        bool        = False
 
     while True:
-        now     = _now_ist()
-        h, m    = now.hour, now.minute
-        in_window = now.weekday() < 5 and ((h == 9 and m >= 15) or h == 10)
+        now  = _now_ist()
+        h, m = now.hour, now.minute
+        in_window = (
+            now.weekday() < 5 and (
+                (h == 9 and m >= 15) or
+                (10 <= h <= 14) or
+                (h == 15 and m <= 30)
+            )
+        )
 
         if in_window:
-            # Reset state at start of each new day
+            # Reset state at start of each new trading day
             today = now.date()
             if alert_date != today:
                 alerted         = set()
                 alert_date      = today
                 prev_above_r1   = set()
                 baseline_seeded = False
+                watchlist_sent  = False
 
             try:
                 data    = await scan_pivot_breakouts()
                 bullish = data.get("bullish", [])
+                bearish = data.get("bearish", [])
                 current_above_r1 = {s["symbol"] for s in bullish}
 
                 if not baseline_seeded:
-                    # First scan of the day — record state, send NO alerts
+                    # First scan — seed baseline, no crossover alerts
                     prev_above_r1   = current_above_r1
                     baseline_seeded = True
                     logger.info("Pivot baseline seeded: %d above R1", len(prev_above_r1))
                 else:
+                    # Send morning watchlist once between 9:20–9:35 AM
+                    if not watchlist_sent and h == 9 and 20 <= m <= 35:
+                        await _send_morning_watchlist(bullish, bearish)
+                        watchlist_sent = True
+                        # Mark already-open stocks as alerted so we don't double-alert them
+                        for s in bullish:
+                            alerted.add(s["symbol"])
+
                     newly_crossed = current_above_r1 - prev_above_r1
                     prev_above_r1 = current_above_r1
 
