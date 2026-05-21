@@ -246,6 +246,7 @@ def _build_pm_pdf(
     prev_runners:      list[dict] | None = None,
     prev_runners_date: str = "",
     prev_hit_count:    int = 0,
+    earnings_runners:  list[dict] | None = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -542,6 +543,106 @@ def _build_pm_pdf(
         ))
         story.append(Spacer(1, 6*mm))
 
+    # ── 4b. Earnings Catalyst ─────────────────────────────────────────────────
+    if earnings_runners:
+        EARN_CLR = colors.HexColor("#0f5132")
+        EARN_HDR = colors.HexColor("#198754")
+        _section_header(
+            f"📊 Earnings Catalyst — Runner Candidates with Recent Results  ({len(earnings_runners)} stocks)",
+            "Latest quarterly revenue, PAT, EPS beat/miss · YoY & QoQ growth · AI fundamental + technical alignment",
+            EARN_HDR,
+        )
+        e_hdr = ["#", "Symbol", "Grade", "Quarter", "Rev ₹Cr", "Rev YoY", "PAT ₹Cr", "PAT YoY", "EPS Result"]
+        cw_e  = [6*mm, 22*mm, 16*mm, 18*mm, 20*mm, 16*mm, 20*mm, 16*mm, 26*mm]
+        e_rows = [e_hdr]
+        for i, er in enumerate(earnings_runners, 1):
+            e  = er["earnings"]
+            grade = er.get("grade", "WATCH")
+            def _pct_str(v):
+                return f"{v:+.1f}%" if v is not None else "N/A"
+            eps_str = "N/A"
+            if e.get("eps_actual") is not None:
+                if e.get("eps_est") is not None:
+                    beat = "BEAT" if e.get("eps_beat") else "MISS"
+                    eps_str = f"{e['eps_actual']} vs {e['eps_est']} ({beat})"
+                else:
+                    eps_str = f"EPS: {e['eps_actual']}"
+            e_rows.append([
+                str(i),
+                er["symbol"],
+                grade,
+                e.get("quarter", ""),
+                f"{e['revenue_cr']:.0f}" if e.get("revenue_cr") else "N/A",
+                _pct_str(e.get("rev_yoy")),
+                f"{e['pat_cr']:.0f}"     if e.get("pat_cr")     else "N/A",
+                _pct_str(e.get("pat_yoy")),
+                eps_str,
+            ])
+
+        t_e = Table(e_rows, colWidths=cw_e)
+        ts_e = TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), EARN_HDR),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, 0), 7.5),
+            ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+            ("ALIGN",         (1, 1), (1, -1), "LEFT"),
+            ("ALIGN",         (8, 1), (8, -1), "LEFT"),
+            ("FONTSIZE",      (0, 1), (-1, -1), 7),
+            ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
+            ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ])
+        for i, er in enumerate(earnings_runners, 1):
+            ts_e.add("BACKGROUND", (0, i), (-1, i), ALT_ROW if i % 2 == 0 else colors.white)
+            # Grade color
+            _egc = {"HIGH": GREEN, "STRONG": COBALT, "WATCH": AMBER, "MONITOR": GRAY}
+            ts_e.add("TEXTCOLOR", (2, i), (2, i), _egc.get(er.get("grade", "WATCH"), GRAY))
+            ts_e.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
+            # Rev YoY color (col 5)
+            ry = er["earnings"].get("rev_yoy")
+            if ry is not None:
+                ts_e.add("TEXTCOLOR", (5, i), (5, i), GREEN if ry >= 0 else RED)
+            # PAT YoY color (col 7)
+            py = er["earnings"].get("pat_yoy")
+            if py is not None:
+                ts_e.add("TEXTCOLOR", (7, i), (7, i), GREEN if py >= 0 else RED)
+            # EPS beat/miss color (col 8)
+            if er["earnings"].get("eps_beat") is True:
+                ts_e.add("TEXTCOLOR", (8, i), (8, i), GREEN)
+                ts_e.add("FONTNAME",  (8, i), (8, i), "Helvetica-Bold")
+            elif er["earnings"].get("eps_beat") is False:
+                ts_e.add("TEXTCOLOR", (8, i), (8, i), RED)
+                ts_e.add("FONTNAME",  (8, i), (8, i), "Helvetica-Bold")
+        t_e.setStyle(ts_e)
+        story.append(t_e)
+        story.append(Spacer(1, 4*mm))
+
+        # Per-stock AI earnings analysis paragraphs
+        for er in earnings_runners:
+            ai_para = er.get("ai", "").strip()
+            if not ai_para:
+                continue
+            e = er["earnings"]
+            news_txt = " · ".join(er.get("news", [])[:2]) if er.get("news") else ""
+            catalyst_lbl = f"<b>{er['symbol']}</b>"
+            if e.get("eps_beat") is True:
+                catalyst_lbl += ' <font color="#059669"><b>EPS BEAT</b></font>'
+            elif e.get("eps_beat") is False:
+                catalyst_lbl += ' <font color="#dc2626"><b>EPS MISS</b></font>'
+            if news_txt:
+                catalyst_lbl += f' — <i>{news_txt}</i>'
+            story.append(Paragraph(
+                catalyst_lbl,
+                sty("E_SYM", size=8, color=EARN_CLR, bold=False, before=3, after=1),
+            ))
+            story.append(Paragraph(
+                ai_para,
+                sty("E_AI", size=7.5, color=DARK_BLUE, before=0, after=3, align=TA_JUSTIFY),
+            ))
+        story.append(Spacer(1, 4*mm))
+
     # ── 5. Reversal + Engulfing Setup ─────────────────────────────────────────
     if vwma_hits:
         TEAL2 = colors.HexColor("#0891b2")
@@ -821,16 +922,57 @@ async def pm_scan_and_send() -> None:
         except Exception as e:
             logger.warning("PM Report runners failed: %s", e)
 
-        # AI analysis in thread (blocking OpenAI call)
-        ai_text = await asyncio.to_thread(
-            _generate_ai_picks, long_buildup, breakouts, pullbacks, runners
-        )
+        # Fetch quarterly earnings + NSE announcements for top runners (parallel with AI)
+        runner_syms = [r["symbol"] for r in runners[:15]]
+        earnings_runners: list[dict] = []
+        try:
+            from services.earnings_service import get_runner_earnings, generate_earnings_ai
+            from services.nse_service import get_stock_announcements
+
+            gather_results = await asyncio.gather(
+                asyncio.to_thread(_generate_ai_picks, long_buildup, breakouts, pullbacks, runners),
+                get_runner_earnings(runner_syms),
+                *[get_stock_announcements(s) for s in runner_syms],
+                return_exceptions=True,
+            )
+            ai_text      = gather_results[0] if isinstance(gather_results[0], str) else _fallback_picks(long_buildup, breakouts, pullbacks, runners)
+            earnings_map = gather_results[1] if isinstance(gather_results[1], dict) else {}
+            ann_results      = gather_results[2:]
+            runner_ann_map   = {
+                sym: (ann if isinstance(ann, list) else [])
+                for sym, ann in zip(runner_syms, ann_results)
+            }
+
+            raw_earnings_runners = [
+                {
+                    "symbol":   r["symbol"],
+                    "grade":    r.get("grade", "WATCH"),
+                    "close":    r.get("close", 0),
+                    "earnings": earnings_map[r["symbol"]],
+                    "news":     runner_ann_map.get(r["symbol"], []),
+                    "ai":       "",
+                }
+                for r in runners[:15]
+                if r["symbol"] in earnings_map
+            ]
+            if raw_earnings_runners:
+                earnings_ai_map = await asyncio.to_thread(generate_earnings_ai, raw_earnings_runners)
+                for e in raw_earnings_runners:
+                    e["ai"] = earnings_ai_map.get(e["symbol"], "")
+            earnings_runners = raw_earnings_runners
+            logger.info("PM earnings: %d runners have recent quarterly data", len(earnings_runners))
+        except Exception as exc:
+            logger.warning("PM earnings fetch failed: %s", exc)
+            ai_text = await asyncio.to_thread(
+                _generate_ai_picks, long_buildup, breakouts, pullbacks, runners
+            )
 
         # Build PDF in thread
         pdf_bytes = await asyncio.to_thread(
             _build_pm_pdf, date_str, long_buildup, breakouts, pullbacks, runners, ai_text,
             vwma_hits or [], retrace_hits or [],
             prev_runners or [], prev_runners_date, prev_hit_count,
+            earnings_runners or [],
         )
 
         # Telegram caption
