@@ -129,8 +129,26 @@ def calc_volume_ratio(ohlcv: list[dict], period: int = 20) -> float:
     return round(today_vol / avg, 2) if avg else 1.0
 
 
+def calc_rsi_series(closes: list[float], period: int = 14) -> list[float]:
+    """Return a list of RSI values (same length as closes, NaN-padded as 50.0 at start)."""
+    if len(closes) < period + 1:
+        return [50.0] * len(closes)
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains  = [max(d, 0.0) for d in deltas]
+    losses = [max(-d, 0.0) for d in deltas]
+    result = [50.0] * (period + 1)
+    avg_g = sum(gains[:period]) / period
+    avg_l = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_g = (avg_g * (period - 1) + gains[i]) / period
+        avg_l = (avg_l * (period - 1) + losses[i]) / period
+        rsi = 100.0 if avg_l == 0 else round(100 - 100 / (1 + avg_g / avg_l), 1)
+        result.append(rsi)
+    return result
+
+
 def summarise(ohlcv: list[dict]) -> dict:
-    """One-stop summary: patterns, RSI, VWMA, volume ratio, trend."""
+    """One-stop summary: patterns, RSI (+ direction), VWMA, volume ratio, trend."""
     closes     = [float(d["close"]) for d in ohlcv if d.get("close")]
     patterns   = detect_patterns(ohlcv)
     rsi        = calc_rsi(closes)
@@ -140,12 +158,21 @@ def summarise(ohlcv: list[dict]) -> dict:
     trend      = "Uptrend" if (len(closes) >= 5 and closes[-1] > closes[-5]) else "Downtrend"
     above_vwma = last_close > vwma if vwma else False
 
+    # RSI direction: compare last RSI to 3 bars ago
+    rsi_dir = "Flat"
+    if len(closes) >= 18:
+        rsi_series = calc_rsi_series(closes)
+        if len(rsi_series) >= 4:
+            diff = rsi_series[-1] - rsi_series[-4]
+            rsi_dir = "Rising" if diff > 1.5 else ("Falling" if diff < -1.5 else "Flat")
+
     return {
-        "patterns":   patterns,
-        "rsi":        rsi,
-        "vwma":       vwma,
-        "vol_ratio":  vol_ratio,
-        "above_vwma": above_vwma,
-        "trend":      trend,
-        "rsi_label":  ("Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"),
+        "patterns":      patterns,
+        "rsi":           rsi,
+        "rsi_direction": rsi_dir,
+        "vwma":          vwma,
+        "vol_ratio":     vol_ratio,
+        "above_vwma":    above_vwma,
+        "trend":         trend,
+        "rsi_label":     ("Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"),
     }

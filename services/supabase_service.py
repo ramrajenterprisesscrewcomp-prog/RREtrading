@@ -100,6 +100,8 @@ def save_runners_db(runners: list[dict], date_str: str,
                 "pchange":     float(r.get("pchange", 0)),
                 "close":       float(r.get("close", 0) or r.get("ltp", 0)),
                 "report_type": report_type,
+                "grade":       r.get("grade", "WATCH"),
+                "score":       float(r.get("score", 0)),
             }
             for r in runners
             if r.get("symbol")
@@ -133,6 +135,8 @@ def load_week_runners_db(date_list: list[str],
                     "symbol":      r["symbol"],
                     "pchange":     r["pchange"],
                     "close":       r["close"],
+                    "grade":       r.get("grade", "WATCH"),
+                    "score":       float(r.get("score") or 0),
                     "report_type": r.get("report_type", "eod"),
                 })
         return result
@@ -153,7 +157,13 @@ def load_runners_db() -> tuple[str, list[dict]] | None:
             return "", []
         date_str = rows[0]["date"]
         runners = [
-            {"symbol": r["symbol"], "pchange": r["pchange"], "close": r["close"]}
+            {
+                "symbol":  r["symbol"],
+                "pchange": r["pchange"],
+                "close":   r["close"],
+                "grade":   r.get("grade", "WATCH"),
+                "score":   float(r.get("score") or 0),
+            }
             for r in rows
             if r["date"] == date_str
         ]

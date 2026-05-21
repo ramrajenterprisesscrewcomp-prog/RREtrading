@@ -133,6 +133,23 @@ def _score(s: dict) -> tuple[float, list[str]]:
         score += 1.0
         reasons.append("RS > Nifty ↑")
 
+    # Overnight gap filter: large gap = exhausted move, small gap = clean breakout
+    gap_pct = s.get("gap_pct", 0.0)
+    if gap_pct > 6:
+        score -= 1.5
+        reasons.append(f"Gap Exhausted ({gap_pct:.1f}%)")
+    elif gap_pct > 3.5:
+        score -= 0.5
+        reasons.append(f"Gap Risk ({gap_pct:.1f}%)")
+    elif 0 <= gap_pct <= 1 and s.get("pchange", 0) >= 2:
+        score += 0.3
+        reasons.append("Clean Intraday Move")
+
+    # Repeat winner: was a HIGH/STRONG runner yesterday AND gained again today
+    if s.get("is_repeat_winner") and s.get("pchange", 0) >= 1:
+        score += 0.5
+        reasons.append("Repeat Winner")
+
     return round(score, 1), reasons
 
 
@@ -242,6 +259,12 @@ async def scan_tomorrow_runners() -> list[dict]:
     if not stocks:
         return []
 
+    # Sector data freshness check
+    if sector_map:
+        logger.info("Tomorrow scanner: %d sector-mapped stocks (Leading/Improving)", len(sector_map))
+    else:
+        logger.warning("Tomorrow scanner: sector map empty — RRG data unavailable, sector scoring skipped")
+
     # Nifty 50 pchange for RS comparison
     nifty_pchange = 0.0
     for row in nse_all.get("data", []):
@@ -262,6 +285,17 @@ async def scan_tomorrow_runners() -> list[dict]:
             if sym:
                 tsr_bu_set.add(sym)
 
+    # ── Load yesterday's runners for repeat-winner bonus ─────────────────
+    prev_runner_syms: set[str] = set()
+    try:
+        from services.supabase_service import load_runners_db
+        res = load_runners_db()
+        if res:
+            prev_runner_syms = {r["symbol"] for r in res[1] if r.get("grade") in ("HIGH", "STRONG")}
+            logger.info("Tomorrow scanner: %d prev HIGH/STRONG runners loaded", len(prev_runner_syms))
+    except Exception as exc:
+        logger.debug("Tomorrow scanner: prev runners load failed: %s", exc)
+
     # ── Phase 2: pre-screen using NSE data ───────────────────────────────
     candidates = []
     for s in stocks:
@@ -271,7 +305,15 @@ async def scan_tomorrow_runners() -> list[dict]:
         close_pos = (s["close"] - s["low"]) / hl
         if s["pchange"] < 0.0 or close_pos < 0.50:
             continue
-        candidates.append({**s, "close_position": round(close_pos, 3)})
+        # Overnight gap calculation: implied prev_close from today's pchange
+        prev_c  = s["close"] / (1 + s["pchange"] / 100) if s["pchange"] != -100 else s["close"]
+        gap_pct = round((s["open"] - prev_c) / max(prev_c, 0.001) * 100, 2)
+        candidates.append({
+            **s,
+            "close_position": round(close_pos, 3),
+            "gap_pct":        gap_pct,
+            "is_repeat_winner": s["symbol"] in prev_runner_syms,
+        })
 
     candidates.sort(key=lambda x: x["close_position"], reverse=True)
     candidates = candidates[:_MAX_CANDIDATES]
@@ -327,6 +369,8 @@ async def scan_tomorrow_runners() -> list[dict]:
             "is_tsr_buildup":    sym in tsr_bu_set,
             "rs_outperform":     s["pchange"] > nifty_pchange + 1.0,
             "delivery_pct":      0.0,
+            "gap_pct":           s.get("gap_pct", 0.0),
+            "is_repeat_winner":  s.get("is_repeat_winner", False),
         }
         sc, reasons = _score(tagged)
         tagged["score"]   = sc

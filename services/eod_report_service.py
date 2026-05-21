@@ -16,7 +16,9 @@ import io
 import json
 import logging
 import pathlib
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 logger = logging.getLogger(__name__)
 
@@ -164,10 +166,12 @@ def get_eod_watchlist(
 
 # ── AI Gainer Analysis ────────────────────────────────────────────────────────
 
-def _generate_gainer_analysis(gainers: list[dict]) -> dict:
+def _generate_gainer_analysis(gainers: list[dict],
+                              announcements: dict | None = None) -> dict:
     """
     Batch GPT-4o-mini call: returns
       {"reasons": {symbol: "30-word reason"}, "early_signal_insight": "100-word text"}
+    announcements: {symbol: [headline1, headline2, ...]} from NSE corp announcements
     """
     if not gainers:
         return {"reasons": {}, "early_signal_insight": ""}
@@ -184,15 +188,20 @@ def _generate_gainer_analysis(gainers: list[dict]) -> dict:
             high = _safe_float(s.get("high", 0))
             low  = _safe_float(s.get("low", 0))
             cls  = _safe_float(s.get("close", 0))
-            lines.append(f"  {sym}: +{pch:.2f}%  Vol:{vol}  H:{high}  L:{low}  C:{cls}")
+            ann  = (announcements or {}).get(sym, [])
+            news_txt = "; ".join(ann[:2]) if ann else "No announcements"
+            lines.append(
+                f"  {sym}: +{pch:.2f}%  Vol:{vol}  H:{high}  L:{low}  C:{cls}  News:{news_txt}"
+            )
 
         prompt = (
-            "You are an Indian stock market analyst. Today's top gainers (Nifty 500):\n"
+            "You are an Indian stock market analyst. Today's top gainers (Nifty 500) "
+            "with NSE corporate announcements (News field):\n"
             + "\n".join(lines)
             + "\n\n"
-            "Task 1 — For EACH stock above, write exactly 30 words explaining WHY it gained today "
-            "(news catalyst, sector move, technical breakout, FII/DII action, earnings, etc.). "
-            "Be specific — no generic phrases.\n\n"
+            "Task 1 — For EACH stock above, write exactly 30 words explaining WHY it gained today. "
+            "If News is provided, use it as the primary catalyst. Otherwise infer from sector/technicals. "
+            "Be specific — mention the actual catalyst, not generic phrases.\n\n"
             "Task 2 — Write 100 words total titled EARLY SIGNAL PLAYBOOK: "
             "How could a trader have spotted these winners BEFORE today's open? "
             "Mention pre-market cues, overnight gaps, volume patterns, or sector signals.\n\n"
@@ -218,6 +227,43 @@ def _generate_gainer_analysis(gainers: list[dict]) -> dict:
     except Exception as exc:
         logger.warning("Gainer analysis AI failed: %s", exc)
         return {"reasons": {}, "early_signal_insight": ""}
+
+
+# ── AI Loser Analysis ────────────────────────────────────────────────────────
+
+def _generate_loser_analysis(losers: list[dict]) -> dict[str, str]:
+    """Batch GPT-4o-mini: returns {symbol: '20-word reason for decline'}."""
+    if not losers:
+        return {}
+    try:
+        from services.openai_service import _get_client, _is_ai_hours, _under_limit, _record_cost
+        if not _is_ai_hours() or not _under_limit():
+            return {}
+        lines = [
+            f"  {s.get('symbol','')}: {_safe_float(s.get('pchange',0)):.2f}%  "
+            f"Vol:{_fmt_vol(s.get('volume',0))}"
+            for s in losers[:10]
+        ]
+        prompt = (
+            "You are an Indian stock market analyst. Today's top losers (Nifty 500):\n"
+            + "\n".join(lines)
+            + "\n\nFor EACH stock, write exactly 20 words explaining WHY it fell today. "
+            "Be specific: sector weakness, earnings miss, FII selling, technical breakdown, news.\n\n"
+            "Respond ONLY in JSON (no markdown):\n"
+            '{"SYMBOL1": "20 words...", "SYMBOL2": "20 words..."}'
+        )
+        resp = _get_client().chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600,
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+        _record_cost(resp.usage)
+        return json.loads(resp.choices[0].message.content)
+    except Exception as exc:
+        logger.warning("Loser analysis AI failed: %s", exc)
+        return {}
 
 
 # ── Nifty Day Intelligence AI ────────────────────────────────────────────────
@@ -411,6 +457,7 @@ def _build_eod_pdf(
     oi_opinion:           dict | None = None,
     weekly_strikes:       list[dict] | None = None,
     market_news:          list[dict] | None = None,
+    loser_reasons:        dict | None = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -434,6 +481,16 @@ def _build_eod_pdf(
     BORDER    = colors.HexColor("#e5e7eb")
     ALT_ROW   = colors.HexColor("#f9fafb")
     GOLD      = colors.HexColor("#d97706")
+
+    def _pn(canvas_obj, _doc):
+        canvas_obj.saveState()
+        canvas_obj.setFont("Helvetica", 6.5)
+        canvas_obj.setFillColor(GRAY)
+        canvas_obj.drawCentredString(
+            A4[0] / 2, 7 * mm,
+            f"RRE Trading Bot  ·  4:00 PM EOD Report  ·  {date_str}  ·  Page {canvas_obj.getPageNumber()}",
+        )
+        canvas_obj.restoreState()
 
     def sty(name, font="Helvetica", size=9, color=DARK_BLUE,
             align=TA_LEFT, before=0, after=2, bold=False, italic=False):
@@ -472,6 +529,18 @@ def _build_eod_pdf(
         f"Runner Candidates: <b>{len(runners)}</b>",
         sty("SUM", size=8, color=DARK_BLUE, align=TA_CENTER, after=2),
     ))
+    if all_stocks:
+        _adv = sum(1 for s in all_stocks if _safe_float(s.get("pchange", 0)) > 0)
+        _dec = sum(1 for s in all_stocks if _safe_float(s.get("pchange", 0)) < 0)
+        _unc = len(all_stocks) - _adv - _dec
+        _adr = round(_adv / max(_dec, 1), 2)
+        story.append(Paragraph(
+            f"Market Breadth (Nifty 500):  "
+            f"<font color='#059669'><b>Advances: {_adv}</b></font>  ·  "
+            f"<font color='#dc2626'><b>Declines: {_dec}</b></font>  ·  "
+            f"Unchanged: {_unc}  ·  A/D Ratio: <b>{_adr}x</b>",
+            sty("BREADTH", size=8, color=DARK_BLUE, align=TA_CENTER, after=2),
+        ))
     story.append(Spacer(1, 5*mm))
 
     def _section_header(title, subtitle, color):
@@ -829,6 +898,45 @@ def _build_eod_pdf(
             ts_l.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
         t_l.setStyle(ts_l)
         story.append(t_l)
+
+        # ── 3b. Loser Insights (AI 20-word reasons) ───────────────────────────
+        if loser_reasons:
+            _lrsn = ParagraphStyle("LRSN", fontName="Helvetica", fontSize=7,
+                                   textColor=DARK_BLUE, leading=9)
+            lr_rows = [["#", "Symbol", "Loss%", "Why It Fell Today (AI)"]]
+            cw_lr   = [7*mm, 30*mm, 18*mm, 125*mm]
+            for idx, s in enumerate(losers[:10], 1):
+                sym    = s.get("symbol", "")
+                reason = loser_reasons.get(sym, "")
+                if not reason:
+                    continue
+                pch = _safe_float(s.get("pchange", 0))
+                lr_rows.append([str(idx), sym, f"{pch:.2f}%", Paragraph(reason, _lrsn)])
+            if len(lr_rows) > 1:
+                _section_header("Loser Insights -- AI Analysis", "Why each stock fell today", RED)
+                t_lr = Table(lr_rows, colWidths=cw_lr)
+                ts_lr = TableStyle([
+                    ("BACKGROUND",    (0, 0), (-1, 0), RED),
+                    ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE",      (0, 0), (-1, 0), 7.5),
+                    ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+                    ("ALIGN",         (1, 1), (1, -1), "LEFT"),
+                    ("ALIGN",         (3, 0), (3, -1), "LEFT"),
+                    ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+                    ("FONTSIZE",      (0, 1), (2, -1), 7),
+                    ("FONTNAME",      (0, 1), (2, -1), "Helvetica"),
+                    ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
+                    ("TOPPADDING",    (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ])
+                for ii in range(1, len(lr_rows)):
+                    ts_lr.add("BACKGROUND", (0, ii), (-1, ii),
+                              ALT_ROW if ii % 2 == 0 else colors.white)
+                    ts_lr.add("TEXTCOLOR", (2, ii), (2, ii), RED)
+                    ts_lr.add("FONTNAME",  (2, ii), (2, ii), "Helvetica-Bold")
+                t_lr.setStyle(ts_lr)
+                story.append(t_lr)
         story.append(Spacer(1, 6*mm))
 
     # ── 4. F&O Long Buildup ───────────────────────────────────────────────────
@@ -1026,27 +1134,32 @@ def _build_eod_pdf(
             sty("NO_R", size=8, color=GRAY, align=TA_CENTER, italic=True),
         ))
     else:
-        rt_hdr = ["#", "Symbol", "Pattern", "LTP", "VWMA(20)", "Touch%", "Body%", "Wick%"]
-        cw_rt  = [7*mm, 25*mm, 42*mm, 20*mm, 20*mm, 18*mm, 15*mm, 13*mm]
+        rt_hdr = ["#", "Symbol", "Pattern", "LTP", "VWMA(20)", "Entry ≥", "Target", "SL"]
+        cw_rt  = [7*mm, 25*mm, 40*mm, 20*mm, 20*mm, 20*mm, 18*mm, 10*mm]
+        cw_rt[-1] = 160*mm - sum(cw_rt[:-1])
         rt_rows = [rt_hdr]
         for i, h in enumerate(retrace_hits[:25], 1):
-            pat = " | ".join(h.get("patterns", []))
+            pat  = " | ".join(h.get("patterns", []))
+            ltp  = h["ltp"]
+            vwma = h["vwma"]
             rt_rows.append([
                 str(i), h["symbol"],
                 pat,
-                f"{h['ltp']:,.2f}",
-                f"{h['vwma']:,.2f}",
-                f"{h.get('touch_pct', 0):+.2f}%",
-                f"{h.get('body_pct', 0):.1f}%",
-                f"{h.get('wick_pct', 0):.1f}%",
+                f"{ltp:,.2f}",
+                f"{vwma:,.2f}",
+                f"{ltp * 1.005:,.2f}",
+                f"{ltp * 1.04:,.2f}",
+                f"{vwma * 0.99:,.2f}",
             ])
         t_rt, ts_rt = _simple_table(rt_rows, cw_rt, TEAL3)
         ts_rt.add("ALIGN", (1, 1), (2, -1), "LEFT")
         for i, h in enumerate(retrace_hits[:25], 1):
             ts_rt.add("TEXTCOLOR", (2, i), (2, i), TEAL3)
             ts_rt.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
-            pch_clr = GREEN if h.get("pchange", 0) >= 0 else RED
-            ts_rt.add("TEXTCOLOR", (5, i), (5, i), AMBER)
+            ts_rt.add("TEXTCOLOR", (5, i), (5, i), AMBER)   # Entry
+            ts_rt.add("TEXTCOLOR", (6, i), (6, i), GREEN)   # Target
+            ts_rt.add("TEXTCOLOR", (7, i), (7, i), RED)     # SL
+            ts_rt.add("FONTNAME",  (5, i), (7, i), "Helvetica-Bold")
         t_rt.setStyle(ts_rt)
         story.append(t_rt)
     story.append(Spacer(1, 6*mm))
@@ -1197,11 +1310,11 @@ def _build_eod_pdf(
     story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
     story.append(Paragraph(
         f"Generated by RRE Market Scanner  |  "
-        f"{datetime.now().strftime('%d %b %Y %H:%M IST')}  |  "
+        f"{datetime.now(_IST).strftime('%d %b %Y %H:%M IST')}  |  "
         "Data: NSE India | TSR Pro | Yahoo Finance | OpenAI",
         sty("F", size=6.5, color=GRAY, align=TA_CENTER, before=6),
     ))
-    doc.build(story)
+    doc.build(story, onFirstPage=_pn, onLaterPages=_pn)
     return buf.getvalue()
 
 
@@ -1226,7 +1339,7 @@ async def eod_scan_and_send() -> None:
     from services.news_service import get_policy_news
 
     logger.info("EOD Report: starting 4:00 PM scan")
-    date_str = datetime.now().strftime("%d %b %Y")
+    date_str = datetime.now(_IST).strftime("%d %b %Y")
     prev_runners_date, prev_runners = _load_prev_runners()
 
     try:
@@ -1242,6 +1355,19 @@ async def eod_scan_and_send() -> None:
 
         stocks  = stocks or []
         runners = runners or []
+
+        # Holiday / data guard: if NSE returned < 50 stocks, likely a holiday
+        if len(stocks) < 50:
+            logger.warning("EOD Report: only %d stocks from NSE — likely holiday, skipping", len(stocks))
+            try:
+                from services.telegram_service import send_message
+                await send_message(
+                    f"⚠️ 4:00 PM EOD Report skipped on {date_str} — "
+                    f"NSE returned {len(stocks)} stocks (market holiday or data unavailable)"
+                )
+            except Exception:
+                pass
+            return {}
 
         # VWMA scans — isolated so a failure never blocks the main report
         vwma_hits    = []
@@ -1289,6 +1415,20 @@ async def eod_scan_and_send() -> None:
         delivery        = get_high_delivery_stocks(stocks, 12)
         watchlist       = get_eod_watchlist(stocks, long_buildup, runners)
 
+        # Fetch per-gainer NSE announcements for AI news catalyst
+        gainer_announcements: dict[str, list[str]] = {}
+        try:
+            from services.nse_service import get_stock_announcements
+            ann_results = await asyncio.gather(
+                *[get_stock_announcements(s.get("symbol", "")) for s in gainers[:12]],
+                return_exceptions=True,
+            )
+            for s, ann in zip(gainers[:12], ann_results):
+                if isinstance(ann, list):
+                    gainer_announcements[s.get("symbol", "")] = ann
+        except Exception as e:
+            logger.warning("EOD gainer announcements fetch failed: %s", e)
+
         # Extract Nifty / VIX / options data
         nifty_data    = (indices or {}).get("nifty50",    {})
         bnifty_data   = (indices or {}).get("banknifty",  {})
@@ -1303,16 +1443,17 @@ async def eod_scan_and_send() -> None:
             f"{k}: {v:+.1f}%" for k, v in list(sector_data.items())[:6]
         ) if sector_data else ""
 
-        ai_text, gainer_analysis, portfolio_analysis, nifty_intel = await asyncio.gather(
+        ai_text, gainer_analysis, portfolio_analysis, nifty_intel, loser_analysis = await asyncio.gather(
             asyncio.to_thread(
                 _generate_eod_ai, gainers, losers, long_buildup, runners, watchlist, sector_data
             ),
-            asyncio.to_thread(_generate_gainer_analysis, gainers),
+            asyncio.to_thread(_generate_gainer_analysis, gainers, gainer_announcements),
             asyncio.to_thread(generate_portfolio_analysis, portfolio_with_ltp, sector_ctx),
             asyncio.to_thread(
                 _generate_nifty_intelligence,
                 nifty_data, bnifty_data, vix_data, oi_opinion, weekly_strikes, market_news,
             ),
+            asyncio.to_thread(_generate_loser_analysis, losers),
         )
         gainer_reasons       = gainer_analysis.get("reasons", {})
         early_signal_insight = gainer_analysis.get("early_signal_insight", "")
@@ -1334,6 +1475,7 @@ async def eod_scan_and_send() -> None:
             oi_opinion  or {},        # Options PCR / sentiment / levels
             weekly_strikes or [],     # Top option chain strikes
             market_news or [],        # Today's market news
+            loser_analysis or {},     # AI 20-word reasons for top losers
         )
 
         # Save today's runners so tomorrow's report can compare against them
@@ -1358,7 +1500,7 @@ async def eod_scan_and_send() -> None:
             "AI EOD analysis + Tomorrow strategy included in PDF",
         ]
 
-        filename = f"RRE_EOD_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        filename = f"RRE_EOD_{datetime.now(_IST).strftime('%Y%m%d_%H%M')}.pdf"
         await send_document(pdf_bytes, filename, "\n".join(caption_lines))
         logger.info(
             "EOD Report sent — %d gainers, %d losers, %d LB, %d watchlist, %d runners",

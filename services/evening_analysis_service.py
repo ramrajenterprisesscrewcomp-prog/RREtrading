@@ -120,7 +120,7 @@ def _build_evening_pdf(date_str: str, nse_gainers: list[dict],
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                              leftMargin=12*mm, rightMargin=12*mm,
-                             topMargin=12*mm, bottomMargin=12*mm)
+                             topMargin=12*mm, bottomMargin=14*mm)
 
     GREEN  = colors.HexColor("#22c55e")
     RED    = colors.HexColor("#ef4444")
@@ -130,6 +130,17 @@ def _build_evening_pdf(date_str: str, nse_gainers: list[dict],
     NAVY   = colors.HexColor("#0f172a")
     WHITE  = colors.white
     LGRAY  = colors.HexColor("#94a3b8")
+    A4_W   = A4[0]
+
+    def _pn(canvas_obj, _doc):
+        canvas_obj.saveState()
+        canvas_obj.setFont("Helvetica", 6.5)
+        canvas_obj.setFillColor(LGRAY)
+        canvas_obj.drawCentredString(
+            A4_W / 2, 7 * mm,
+            f"RRE Trading Bot  ·  Evening Analysis  ·  {date_str}  ·  Page {canvas_obj.getPageNumber()}",
+        )
+        canvas_obj.restoreState()
 
     def _p(txt, size=8, bold=False, color=WHITE, align=TA_LEFT):
         return Paragraph(txt, ParagraphStyle("x", fontSize=size, leading=size+3,
@@ -236,26 +247,36 @@ def _build_evening_pdf(date_str: str, nse_gainers: list[dict],
                         size=9, bold=True, color=WHITE))
         story.append(Spacer(1, 1*mm))
         for g in gainers:
-            sym   = g.get("symbol", "")
-            tech  = tech_map.get(sym, {})
-            ai_ex = ai_map.get(sym, "")
-            pats  = ", ".join(tech.get("patterns", [])) or "No pattern"
-            rsi   = tech.get("rsi", 50)
-            vr    = tech.get("vol_ratio", 1.0)
-            trend = tech.get("trend", "")
-            news  = "; ".join(tech.get("news", [])[:2]) or "No announcements today"
+            sym     = g.get("symbol", "")
+            tech    = tech_map.get(sym, {})
+            ai_ex   = ai_map.get(sym, "")
+            pats    = ", ".join(tech.get("patterns", [])) or "No pattern"
+            rsi     = tech.get("rsi", 50)
+            rsi_dir = tech.get("rsi_direction", "Flat")
+            rsi_arrow = "↑" if rsi_dir == "Rising" else ("↓" if rsi_dir == "Falling" else "→")
+            vr      = tech.get("vol_ratio", 1.0)
+            trend   = tech.get("trend", "")
+            vwma_st = "Above VWMA ▲" if tech.get("above_vwma") else "Below VWMA ▼"
+            news_items = tech.get("news", [])
+            news    = "; ".join(news_items[:2]) if news_items else ""
 
+            # Technical line
             story.append(_p(
                 f"<b>{sym}</b>  "
                 f"<font color='#22c55e'>+{float(g.get('pchange',0)):.2f}%</font>  "
-                f"| Pattern: <b>{pats}</b>  | RSI: <b>{rsi}</b>  "
-                f"| Vol: <b>{vr:.1f}×</b> avg  | Trend: {trend}",
-                size=8
+                f"| Pattern: <b>{pats}</b>  "
+                f"| RSI: <b>{rsi} {rsi_arrow} {rsi_dir}</b>  "
+                f"| Vol: <b>{vr:.1f}×</b>  | {vwma_st}  | {trend}",
+                size=8,
             ))
+            # News catalyst line (only if news available)
             if news:
-                story.append(_p(f"📢 News: {news}", size=7.5, color=BLUE))
+                story.append(_p(f"  Catalyst: {news}", size=7.5, color=BLUE))
+            else:
+                story.append(_p("  No announcements — technical move", size=7, color=LGRAY))
+            # AI explanation
             if ai_ex:
-                story.append(_p(f"🤖 {ai_ex}", size=7.5, color=LGRAY))
+                story.append(_p(f"  AI: {ai_ex}", size=7.5, color=LGRAY))
             story.append(Spacer(1, 1.5*mm))
 
         story.append(Spacer(1, 3*mm))
@@ -272,7 +293,7 @@ def _build_evening_pdf(date_str: str, nse_gainers: list[dict],
         size=7, color=LGRAY, align=TA_CENTER
     ))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_pn, onLaterPages=_pn)
     return buf.getvalue()
 
 

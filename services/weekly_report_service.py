@@ -160,7 +160,7 @@ def _build_weekly_pdf(week_dates, runner_by_day,
     buf   = BytesIO()
     doc   = SimpleDocTemplate(buf, pagesize=A4,
                                leftMargin=12*mm, rightMargin=12*mm,
-                               topMargin=12*mm, bottomMargin=12*mm)
+                               topMargin=12*mm, bottomMargin=14*mm)
 
     GREEN  = colors.HexColor("#22c55e")
     RED    = colors.HexColor("#ef4444")
@@ -169,6 +169,17 @@ def _build_weekly_pdf(week_dates, runner_by_day,
     NAVY   = colors.HexColor("#0f172a")
     WHITE  = colors.white
     LGRAY  = colors.HexColor("#94a3b8")
+
+    def _pn(canvas_obj, _doc):
+        canvas_obj.saveState()
+        canvas_obj.setFont("Helvetica", 6.5)
+        canvas_obj.setFillColor(LGRAY)
+        canvas_obj.drawCentredString(
+            W / 2, 7 * mm,
+            f"RRE Trading Bot  ·  Weekly Report  ·  {week_dates[0]} – {week_dates[-1]}"
+            f"  ·  Page {canvas_obj.getPageNumber()}",
+        )
+        canvas_obj.restoreState()
 
     def _style(name, size=8, bold=False, color=WHITE, align=TA_LEFT):
         return ParagraphStyle(name, fontSize=size, leading=size + 3,
@@ -201,6 +212,31 @@ def _build_weekly_pdf(week_dates, runner_by_day,
                     color=GREEN, align=TA_CENTER))
     story.append(pg(f"{week_dates[0]}  →  {week_dates[-1]}", size=9,
                     color=LGRAY, align=TA_CENTER))
+    story.append(Spacer(1, 4*mm))
+    story.append(hr())
+
+    # ── Combined Win Rate Summary ─────────────────────────────────────────────
+    total_pm_w  = sum(s["wins"]  for s in pm_stats.values())
+    total_pm_t  = sum(s["total"] for s in pm_stats.values())
+    total_eod_w = sum(s["wins"]  for s in eod_stats.values())
+    total_eod_t = sum(s["total"] for s in eod_stats.values())
+    pm_wr  = round(total_pm_w  / total_pm_t  * 100, 1) if total_pm_t  else 0
+    eod_wr = round(total_eod_w / total_eod_t * 100, 1) if total_eod_t else 0
+    combined_w  = total_pm_w  + total_eod_w
+    combined_t  = total_pm_t  + total_eod_t
+    combined_wr = round(combined_w / combined_t * 100, 1) if combined_t else 0
+
+    def _wr_hex(wr): return "22c55e" if wr >= 50 else ("f59e0b" if wr >= 35 else "ef4444")
+
+    story.append(pg(
+        f"2:45 PM Report: <font color='#{_wr_hex(pm_wr)}'><b>{pm_wr}%</b></font> "
+        f"({total_pm_w}/{total_pm_t})  |  "
+        f"4:00 PM EOD: <font color='#{_wr_hex(eod_wr)}'><b>{eod_wr}%</b></font> "
+        f"({total_eod_w}/{total_eod_t})  |  "
+        f"Combined: <font color='#{_wr_hex(combined_wr)}'><b>{combined_wr}%</b></font> "
+        f"({combined_w}/{combined_t})  (Win = next-day gain &gt;1%)",
+        size=8.5, color=LGRAY,
+    ))
     story.append(Spacer(1, 4*mm))
     story.append(hr())
 
@@ -364,7 +400,7 @@ def _build_weekly_pdf(week_dates, runner_by_day,
         size=7, color=LGRAY, align=TA_CENTER
     ))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=_pn, onLaterPages=_pn)
     return buf.getvalue()
 
 

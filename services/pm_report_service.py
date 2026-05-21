@@ -11,9 +11,22 @@ Sections:
 import asyncio
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _load_prev_runners() -> tuple[str, list[dict]]:
+    """Load previous day's runner results for the PM mini-summary."""
+    try:
+        from services.supabase_service import load_runners_db
+        result = load_runners_db()
+        if result is not None:
+            return result
+    except Exception as exc:
+        logger.warning("PM _load_prev_runners: %s", exc)
+    return "", []
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -222,14 +235,17 @@ def _fallback_picks(lb, bo, pb, runners) -> str:
 # ── PDF Builder ───────────────────────────────────────────────────────────────
 
 def _build_pm_pdf(
-    date_str:       str,
-    long_buildup:   list[dict],
-    breakouts:      list[dict],
-    pullbacks:      list[dict],
-    runners:        list[dict],
-    ai_text:        str,
-    vwma_hits:      list[dict] | None = None,
-    retrace_hits:   list[dict] | None = None,
+    date_str:          str,
+    long_buildup:      list[dict],
+    breakouts:         list[dict],
+    pullbacks:         list[dict],
+    runners:           list[dict],
+    ai_text:           str,
+    vwma_hits:         list[dict] | None = None,
+    retrace_hits:      list[dict] | None = None,
+    prev_runners:      list[dict] | None = None,
+    prev_runners_date: str = "",
+    prev_hit_count:    int = 0,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -251,6 +267,16 @@ def _build_pm_pdf(
     GRAY      = colors.HexColor("#6b7280")
     BORDER    = colors.HexColor("#e5e7eb")
     ALT_ROW   = colors.HexColor("#f9fafb")
+
+    def _pn(canvas_obj, _doc):
+        canvas_obj.saveState()
+        canvas_obj.setFont("Helvetica", 6.5)
+        canvas_obj.setFillColor(GRAY)
+        canvas_obj.drawCentredString(
+            A4[0] / 2, 7 * mm,
+            f"RRE Trading Bot  ·  2:45 PM Report  ·  {date_str}  ·  Page {canvas_obj.getPageNumber()}",
+        )
+        canvas_obj.restoreState()
 
     def sty(name, font="Helvetica", size=9, color=DARK_BLUE,
             align=TA_LEFT, before=0, after=2, bold=False, italic=False):
@@ -290,6 +316,27 @@ def _build_pm_pdf(
         sty("SUM", size=8, color=DARK_BLUE, align=TA_CENTER, after=2),
     ))
     story.append(Spacer(1, 5*mm))
+
+    # ── Yesterday's Runner Mini-Summary ──────────────────────────────────────
+    if prev_runners:
+        GOLD2    = colors.HexColor("#b45309")
+        date_lbl = f"  ({prev_runners_date})" if prev_runners_date else ""
+        hit_pct  = round(prev_hit_count / len(prev_runners) * 100) if prev_runners else 0
+        syms_str = "  ·  ".join(r.get("symbol", "") for r in prev_runners[:6])
+        more     = f"  + {len(prev_runners) - 6} more" if len(prev_runners) > 6 else ""
+        story.append(HRFlowable(width="100%", thickness=0.8, color=GOLD2))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(
+            f"Yesterday's Runners{date_lbl}:  {syms_str}{more}",
+            sty("PY1", size=7.5, color=GOLD2, before=1, after=1),
+        ))
+        story.append(Paragraph(
+            f"Intraday Check (at 2:45 PM):  "
+            f"<b>{prev_hit_count}</b> of <b>{len(prev_runners)}</b> gained &gt;1%  "
+            f"({hit_pct}% hit rate so far today)",
+            sty("PY2", size=7.5, color=GOLD2, before=1, after=2),
+        ))
+        story.append(Spacer(1, 3*mm))
 
     def _generic_table(rows_data, headers, col_widths, hdr_color, row_fn,
                        pch_col=None, extra_styles=None):
@@ -441,19 +488,27 @@ def _build_pm_pdf(
             "Sector RS · Breakout · Volume · Close Near High · Delivery · F&O OI — Multi-factor score",
             GOLD,
         )
-        run_hdr = ["#", "Symbol", "Score", "Grade", "Close ₹", "Chg %", "Vol×", "Key Signals"]
+        GRADE_TARGET = {"HIGH": 0.08, "STRONG": 0.06, "WATCH": 0.05, "MONITOR": 0.04}
+        run_hdr = ["#", "Symbol", "Grade", "Close ₹", "Entry", "Target", "SL", "Key Signals"]
         run_rows = [run_hdr]
-        cw = [8*mm, 28*mm, 14*mm, 28*mm, 26*mm, 18*mm, 14*mm, 0]
+        cw = [6*mm, 22*mm, 18*mm, 22*mm, 22*mm, 22*mm, 20*mm, 0]
         cw[-1] = 160*mm - sum(cw[:-1])
 
         for rank, r in enumerate(runners[:20], 1):
-            grade = r.get("grade", "WATCH")
-            sigs  = " · ".join(r.get("reasons", [])[:3])
+            grade  = r.get("grade", "WATCH")
+            sigs   = " · ".join(r.get("reasons", [])[:3])
+            close  = r["close"]
+            entry  = round(close * 1.002, 2)
+            target = round(close * (1 + GRADE_TARGET.get(grade, 0.05)), 2)
+            sl     = round(r.get("low", close * 0.97), 2)
             run_rows.append([
-                str(rank), r["symbol"], str(r["score"]),
-                GRADE_LBL.get(grade, grade),
-                f"{r['close']:,.2f}", f"{r['pchange']:+.2f}%",
-                f"{r.get('vol_ratio', 0):.1f}×", sigs,
+                str(rank), r["symbol"],
+                grade,
+                f"{close:,.2f}",
+                f"{entry:,.2f}",
+                f"{target:,.2f}",
+                f"{sl:,.2f}",
+                sigs,
             ])
 
         t_run = Table(run_rows, colWidths=cw)
@@ -473,10 +528,10 @@ def _build_pm_pdf(
         ])
         for i, r in enumerate(runners[:20], 1):
             ts_run.add("BACKGROUND", (0, i), (-1, i), ALT_ROW if i % 2 == 0 else colors.white)
-            ts_run.add("TEXTCOLOR", (2, i), (3, i), GRADE_CLR.get(r.get("grade", "WATCH"), GRAY))
-            ts_run.add("FONTNAME",  (2, i), (3, i), "Helvetica-Bold")
-            pch_clr = GREEN if r["pchange"] >= 0 else RED
-            ts_run.add("TEXTCOLOR", (5, i), (5, i), pch_clr)
+            ts_run.add("TEXTCOLOR", (2, i), (2, i), GRADE_CLR.get(r.get("grade", "WATCH"), GRAY))
+            ts_run.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
+            ts_run.add("TEXTCOLOR", (5, i), (5, i), GREEN)   # Target in green
+            ts_run.add("TEXTCOLOR", (6, i), (6, i), RED)     # SL in red
         t_run.setStyle(ts_run)
         story.append(t_run)
         story.append(Spacer(1, 4*mm))
@@ -554,19 +609,22 @@ def _build_pm_pdf(
             "Pin Bar":           GREEN,
             "Bullish Engulfing": colors.HexColor("#065f46"),
         }
-        r_hdr  = ["#", "Symbol", "Pattern", "LTP", "VWMA(20)", "Touch%", "Body%", "Wick%"]
-        cw_r   = [7*mm, 25*mm, 42*mm, 20*mm, 20*mm, 18*mm, 15*mm, 13*mm]
+        r_hdr  = ["#", "Symbol", "Pattern", "LTP", "VWMA(20)", "Entry ≥", "Target", "SL"]
+        cw_r   = [7*mm, 25*mm, 40*mm, 20*mm, 20*mm, 20*mm, 18*mm, 10*mm]
+        cw_r[-1] = 160*mm - sum(cw_r[:-1])
         r_rows = [r_hdr]
         for i, h in enumerate(retrace_hits[:25], 1):
+            ltp  = h["ltp"]
+            vwma = h["vwma"]
             r_rows.append([
                 str(i),
                 h["symbol"],
                 " | ".join(h["patterns"]),
-                f"{h['ltp']:,.2f}",
-                f"{h['vwma']:,.2f}",
-                f"{h['touch_pct']:.2f}%",
-                f"{h['body_pct']:.0f}%",
-                f"{h['wick_pct']:.0f}%",
+                f"{ltp:,.2f}",
+                f"{vwma:,.2f}",
+                f"{ltp * 1.005:,.2f}",
+                f"{ltp * 1.04:,.2f}",
+                f"{vwma * 0.99:,.2f}",
             ])
         t_r = Table(r_rows, colWidths=cw_r)
         ts_r_style = TableStyle([
@@ -588,15 +646,17 @@ def _build_pm_pdf(
             clr = PAT_CLR.get(first_pat, GREEN)
             ts_r_style.add("TEXTCOLOR", (2, i), (2, i), clr)
             ts_r_style.add("FONTNAME",  (2, i), (2, i), "Helvetica-Bold")
-            ts_r_style.add("TEXTCOLOR", (7, i), (7, i), GREEN)
-            ts_r_style.add("FONTNAME",  (7, i), (7, i), "Helvetica-Bold")
+            ts_r_style.add("TEXTCOLOR", (5, i), (5, i), AMBER)   # Entry
+            ts_r_style.add("TEXTCOLOR", (6, i), (6, i), GREEN)   # Target
+            ts_r_style.add("TEXTCOLOR", (7, i), (7, i), RED)     # SL
+            ts_r_style.add("FONTNAME",  (5, i), (7, i), "Helvetica-Bold")
         t_r.setStyle(ts_r_style)
         story.append(t_r)
         story.append(Spacer(1, 3*mm))
         story.append(Paragraph(
-            "Entry: Buy on close above current candle high  |  "
-            "Stop: Below current candle low (VWMA breakdown)  |  "
-            "Target: Previous swing high  |  Touch% = how far low penetrated below VWMA",
+            "Entry: Buy at/above LTP (0.5% above LTP shown)  |  "
+            "Target: ~4% above LTP  |  "
+            "SL: 1% below VWMA (close below VWMA = invalidated setup)",
             sty("RT_RULE", size=7, color=TEAL2, align=TA_CENTER, italic=True),
         ))
     story.append(Spacer(1, 6*mm))
@@ -629,11 +689,11 @@ def _build_pm_pdf(
     story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
     story.append(Paragraph(
         f"Generated by RRE Market Scanner  ·  "
-        f"{datetime.now().strftime('%d %b %Y %H:%M IST')}  ·  "
+        f"{datetime.now(_IST).strftime('%d %b %Y %H:%M IST')}  ·  "
         "Data: NSE India · TSR Pro · Yahoo Finance · OpenAI",
         sty("F", size=6.5, color=GRAY, align=TA_CENTER, before=6),
     ))
-    doc.build(story)
+    doc.build(story, onFirstPage=_pn, onLaterPages=_pn)
     return buf.getvalue()
 
 
@@ -668,7 +728,9 @@ async def pm_scan_and_send() -> None:
     from services.tomorrow_scanner_service import scan_tomorrow_runners
 
     logger.info("PM Report: starting 2:45 PM scan")
-    date_str = datetime.now().strftime("%d %b %Y")
+    date_str = datetime.now(_IST).strftime("%d %b %Y")
+    prev_runners_date, prev_runners = _load_prev_runners()
+    logger.info("PM: loaded %d prev runners from %s", len(prev_runners), prev_runners_date)
 
     try:
         from services.vwma_candle_service import scan_vwma_candle
@@ -680,6 +742,19 @@ async def pm_scan_and_send() -> None:
             get_fno_oi_buildup(15),
             get_tsr_buildup(),
         )
+
+        # Holiday / data guard: if NSE returned < 50 stocks, likely a holiday
+        if len(stocks or []) < 50:
+            logger.warning("PM Report: only %d stocks from NSE — likely holiday, skipping", len(stocks or []))
+            try:
+                from services.telegram_service import send_message
+                await send_message(
+                    f"⚠️ 2:45 PM Report skipped on {date_str} — "
+                    f"NSE returned {len(stocks or [])} stocks (market holiday or data unavailable)"
+                )
+            except Exception:
+                pass
+            return
 
         # VWMA daily reversal scan + live retrace scan — both isolated
         vwma_hits    = []
@@ -730,6 +805,15 @@ async def pm_scan_and_send() -> None:
         breakouts    = scan_consolidation_breakouts(stocks or [])
         pullbacks    = scan_pullback_stocks(stocks or [])
 
+        # Compute prev-runner hit rate at 2:45 PM using today's intraday data
+        prev_hit_count = 0
+        if prev_runners and stocks:
+            stock_pch = {s.get("symbol", ""): _safe_float(s.get("pchange", 0)) for s in stocks}
+            prev_hit_count = sum(
+                1 for r in prev_runners
+                if stock_pch.get(r.get("symbol", ""), 0) >= 1.0
+            )
+
         # Runner scan (Angel One — can take a few minutes)
         runners = []
         try:
@@ -746,6 +830,7 @@ async def pm_scan_and_send() -> None:
         pdf_bytes = await asyncio.to_thread(
             _build_pm_pdf, date_str, long_buildup, breakouts, pullbacks, runners, ai_text,
             vwma_hits or [], retrace_hits or [],
+            prev_runners or [], prev_runners_date, prev_hit_count,
         )
 
         # Telegram caption
@@ -777,7 +862,7 @@ async def pm_scan_and_send() -> None:
         caption_lines.append(f"\n{rt_line}")
         caption_lines.append("AI analysis &amp; trend picks included in PDF")
 
-        filename = f"RRE_PM_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        filename = f"RRE_PM_{datetime.now(_IST).strftime('%Y%m%d_%H%M')}.pdf"
         await send_document(pdf_bytes, filename, "\n".join(caption_lines))
         logger.info(
             "PM Report sent — %d LB · %d breakouts · %d pullbacks · %d runners",
