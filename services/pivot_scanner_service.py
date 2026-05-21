@@ -246,8 +246,8 @@ async def pivot_alert_loop() -> None:
                     baseline_seeded = True
                     logger.info("Pivot baseline seeded: %d above R1", len(prev_above_r1))
                 else:
-                    # Send morning watchlist once between 9:20–9:35 AM
-                    if not watchlist_sent and h == 9 and 20 <= m <= 35:
+                    # Send watchlist on first scan after baseline (fires whenever server starts)
+                    if not watchlist_sent:
                         await _send_morning_watchlist(bullish, bearish)
                         watchlist_sent = True
                         # Mark already-open stocks as alerted so we don't double-alert them
