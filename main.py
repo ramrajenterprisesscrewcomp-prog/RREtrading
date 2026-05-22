@@ -602,6 +602,29 @@ async def pivot_signals_endpoint(force: bool = False):
 
 
 
+@app.post("/api/test-r1-alert")
+async def test_r1_alert():
+    """Force a pivot scan + send morning watchlist to Telegram right now (for testing)."""
+    try:
+        from services.pivot_scanner_service import scan_pivot_breakouts, _send_morning_watchlist, _cache as _piv_cache
+        if "r" in _piv_cache:
+            del _piv_cache["r"]
+        data = await scan_pivot_breakouts()
+        bullish = data.get("bullish", [])
+        bearish = data.get("bearish", [])
+        await _send_morning_watchlist(bullish, bearish)
+        return JSONResponse(content={
+            "sent": True,
+            "bullish_count": len(bullish),
+            "bearish_count": len(bearish),
+            "total_scanned": data.get("total_scanned", 0),
+            "bullish_top5": [s["symbol"] for s in bullish[:5]],
+        })
+    except Exception as exc:
+        logger.warning("test-r1-alert error: %s", exc, exc_info=True)
+        return JSONResponse(content={"sent": False, "error": str(exc)}, status_code=500)
+
+
 @app.get("/api/ai-cost")
 async def ai_cost_endpoint():
     """Today's estimated OpenAI spend and remaining daily budget."""
